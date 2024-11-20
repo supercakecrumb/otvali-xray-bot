@@ -4,15 +4,18 @@ import (
 	"log/slog"
 
 	"github.com/mymmrac/telego"
+	tu "github.com/mymmrac/telego/telegoutil"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 )
 
 type Bot struct {
 	client *telego.Bot
 	logger *slog.Logger
+	db     *database.DB
 }
 
-func NewBot(token string, logger *slog.Logger) (*Bot, error) {
-	bot, err := telego.NewBot(token, telego.WithDefaultDebugLogger())
+func NewBot(token string, logger *slog.Logger, db *database.DB) (*Bot, error) {
+	bot, err := telego.NewBot(token)
 	if err != nil {
 		return nil, err
 	}
@@ -20,6 +23,7 @@ func NewBot(token string, logger *slog.Logger) (*Bot, error) {
 	return &Bot{
 		client: bot,
 		logger: logger,
+		db:     db,
 	}, nil
 }
 
@@ -43,27 +47,41 @@ func (b *Bot) Start() {
 	}
 }
 
-// Command handler for the bot
 func (b *Bot) handleCommand(message *telego.Message) {
-	command := message.Text
 	chatID := message.Chat.ID
+	username := message.From.Username
 
-	switch command {
+	// Enforce username
+	if username == "" {
+		err := b.sendMessage(chatID, "You must set a username to use this bot.\n\nTo set a username:\n1. Go to Telegram Settings.\n2. Tap 'Username'.\n3. Choose a unique username.")
+		if err != nil {
+			b.logger.Error("Failed to send username enforcement message", slog.String("error", err.Error()))
+		}
+		return
+	}
+
+	// Add or update the user in the database
+	user := &database.User{
+		ID:       chatID,
+		Username: username,
+	}
+	if err := b.db.AddUser(user); err != nil {
+		b.logger.Error("Failed to add user to database", slog.String("error", err.Error()))
+		return
+	}
+
+	// Handle commands
+	switch message.Text {
 	case "/start":
 		b.logger.Info("Processing /start command", slog.Int64("chat_id", chatID))
 		err := b.sendMessage(chatID, "Welcome to the bot! Use /help to see available commands.")
 		if err != nil {
 			b.logger.Error("Failed to send /start response", slog.String("error", err.Error()))
 		}
-	case "/help":
-		b.logger.Info("Processing /help command", slog.Int64("chat_id", chatID))
-		err := b.sendMessage(chatID, "Here are the available commands:\n/start - Start the bot\n/help - Show this help message")
-		if err != nil {
-			b.logger.Error("Failed to send /help response", slog.String("error", err.Error()))
-		}
+	case "/invite":
+		b.handleInviteCommand(message)
 	default:
-		b.logger.Info("Unknown command received", slog.Int64("chat_id", chatID), slog.String("command", command))
-		err := b.sendMessage(chatID, "Sorry, I didn't understand that command. Use /help to see available commands.")
+		err := b.sendMessage(chatID, "Unknown command. Use /help to see available commands.")
 		if err != nil {
 			b.logger.Error("Failed to send unknown command response", slog.String("error", err.Error()))
 		}
@@ -72,9 +90,7 @@ func (b *Bot) handleCommand(message *telego.Message) {
 
 // Helper function to send a message to a user
 func (b *Bot) sendMessage(chatID int64, text string) error {
-	_, err := b.client.SendMessage(&telego.SendMessageParams{
-		ChatID: telego.ChatID{ID: chatID},
-		Text:   text,
-	})
+	msg := tu.Message(tu.ID(chatID), text)
+	_, err := b.client.SendMessage(msg)
 	return err
 }
