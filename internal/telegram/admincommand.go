@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -81,14 +82,6 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		IsExclusive: isExclusive,
 	}
 
-	// Save server to database
-	if err := b.db.AddServer(server); err != nil {
-		b.logger.Error("Failed to add server", slog.String("error", err.Error()))
-		msg := tu.Message(tu.ID(chatID), "Не удалось добавить сервер.")
-		_, _ = bot.SendMessage(msg)
-		return
-	}
-
 	// Connect to the server and set up the x3ui client
 	_, err = b.serverHandler.GetClient(server)
 	if err != nil {
@@ -108,11 +101,63 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 			return
 		}
 		// Update server with new InboundID
-		if err := b.db.UpdateServerInboundID(server.ID, inbound.ID); err != nil {
-			b.logger.Error("Failed to update server inbound ID", slog.String("error", err.Error()))
-		}
+		server.InboundID = &inbound.ID
+	}
+
+	// Save server to database
+	if err := b.db.AddServer(server); err != nil {
+		b.logger.Error("Failed to add server", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Не удалось добавить сервер в базу данных.")
+		_, _ = bot.SendMessage(msg)
+		return
 	}
 
 	msg := tu.Message(tu.ID(chatID), "Сервер успешно добавлен и настроен.")
+	_, _ = bot.SendMessage(msg)
+}
+
+func (b *Bot) handleListServers(bot *telego.Bot, update telego.Update) {
+	if update.Message == nil {
+		b.logger.Error("Error handling list servers command", slog.String("error", "update.Message == nil"))
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	userID := update.Message.From.ID
+
+	// Check if user is an admin
+	isAdmin, err := b.db.IsUserAdmin(userID)
+	if err != nil || !isAdmin {
+		msg := tu.Message(tu.ID(chatID), "У вас нет прав для выполнения этой команды.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Fetch servers from the database
+	servers, err := b.db.GetAllServers()
+	if err != nil {
+		b.logger.Error("Failed to fetch servers", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Не удалось получить список серверов.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	if len(servers) == 0 {
+		msg := tu.Message(tu.ID(chatID), "Нет добавленных серверов.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Create a message listing all servers
+	var sb strings.Builder
+	sb.WriteString("Список серверов:\n\n")
+	for _, server := range servers {
+		sb.WriteString(fmt.Sprintf(
+			"ID: %d\nИмя: %s\nСтрана: %s\nГород: %s\nIP: %s\nПорт SSH: %d\nAPI Порт: %d\nИсключительный: %t\n\n",
+			server.ID, server.Name, server.Country, server.City, server.IP, server.SSHPort, server.APIPort, server.IsExclusive,
+		))
+	}
+
+	msg := tu.Message(tu.ID(chatID), sb.String())
 	_, _ = bot.SendMessage(msg)
 }
