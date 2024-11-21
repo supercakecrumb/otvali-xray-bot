@@ -17,6 +17,7 @@ func (b *Bot) registerCommands() {
 
 	b.bh.Handle(b.handleAddServer, th.CommandEqual("add_server"))
 	b.bh.Handle(b.handleListServers, th.CommandEqual("list_servers"))
+	b.bh.Handle(b.handleServerExclusivity, th.CommandEqual("server_exclusivity"))
 
 	// Handle callback queries from inline keyboards
 	b.bh.Handle(b.handleHelpCallback, th.CallbackDataContains("help_"))

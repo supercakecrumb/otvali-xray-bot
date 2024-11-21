@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -159,5 +160,73 @@ func (b *Bot) handleListServers(bot *telego.Bot, update telego.Update) {
 	}
 
 	msg := tu.Message(tu.ID(chatID), sb.String())
+	_, _ = bot.SendMessage(msg)
+}
+
+func (b *Bot) handleServerExclusivity(bot *telego.Bot, update telego.Update) {
+	if update.Message == nil {
+		b.logger.Error("Error handling server_exclusivity command", slog.String("error", "update.Message == nil"))
+		return
+	}
+
+	message := update.Message
+	chatID := message.Chat.ID
+	userID := message.From.ID
+
+	// Check if user is admin
+	isAdmin, err := b.db.IsUserAdmin(userID)
+	if err != nil || !isAdmin {
+		msg := tu.Message(tu.ID(chatID), "У вас нет прав для выполнения этой команды.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	args := strings.Fields(message.Text)
+	if len(args) < 2 {
+		msg := tu.Message(tu.ID(chatID), "Использование: /server_exclusivity <ServerID> <true/false>")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Parse ServerID and exclusivity
+	serverID, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		b.logger.Error("Invalid ServerID", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "ID сервера должен быть числом.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	isExclusive, err := strconv.ParseBool(args[2])
+	if err != nil {
+		b.logger.Error("Invalid exclusivity value", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Значение эксклюзивности должно быть 'true' или 'false'.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Fetch the server
+	server, err := b.db.GetServerByID(serverID)
+	if err != nil {
+		if errors.Is(err, database.ErrServerNotFound) {
+			msg := tu.Message(tu.ID(chatID), fmt.Sprintf("Сервер с ID %d не найден.", serverID))
+			_, _ = bot.SendMessage(msg)
+			return
+		}
+		b.logger.Error("Failed to fetch server", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Ошибка при получении данных сервера.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Update the server exclusivity
+	if err := b.db.UpdateServerExclusivity(server.ID, isExclusive); err != nil {
+		b.logger.Error("Failed to update server exclusivity", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Ошибка при обновлении эксклюзивности сервера.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("Эксклюзивность сервера '%s' установлена в '%t'.", server.Name, isExclusive))
 	_, _ = bot.SendMessage(msg)
 }
