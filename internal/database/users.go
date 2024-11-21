@@ -63,3 +63,12 @@ func (db *DB) UpdateUserUsername(userID int64, username string) error {
 func (db *DB) UpdateUserExclusiveAccess(userID int64, exclusiveAccess bool) error {
 	return db.Conn.Model(&User{}).Where("id = ?", userID).Update("exclusive_access", exclusiveAccess).Error
 }
+
+// GetAdminUsers retrieves all users with IsAdmin set to true
+func (db *DB) GetAdminUsers() ([]User, error) {
+	var admins []User
+	if err := db.Conn.Where("is_admin = ?", true).Find(&admins).Error; err != nil {
+		return nil, err
+	}
+	return admins, nil
+}

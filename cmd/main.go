@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/telegram"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/x3ui"
 	"github.com/supercakecrumb/otvali-xray-bot/pkg/config"
 	"github.com/supercakecrumb/otvali-xray-bot/pkg/logger"
 )
@@ -24,12 +29,34 @@ func main() {
 	}
 
 	// Start the bot
-	bot, err := telegram.NewBot(cfg.TelegramToken, log, db)
+	bot, err := telegram.NewBot(cfg.TelegramToken, cfg.SSHKeyPath, log, db)
 	if err != nil {
 		log.Error("Failed to initialize bot", slog.String("error", err.Error()))
 		return
 	}
 
-	log.Info("Bot started")
-	bot.Start()
+	// Create a context that is cancelled on OS interrupt or terminate signal
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Initialize ServerHandler
+	serverHandler := x3ui.NewServerHandler(cfg.SSHKeyPath, log)
+
+	// Start the bot in a separate goroutine
+	go func() {
+		log.Info("Bot started")
+		bot.Start()
+	}()
+
+	// Wait for the context to be cancelled (signal received)
+	<-ctx.Done()
+	log.Info("Shutting down gracefully...")
+
+	// Stop the bot handler
+	bot.Stop()
+
+	// Close the ServerHandler to clean up SSH connections
+	serverHandler.Close()
+
+	log.Info("Shutdown complete")
 }
