@@ -1,6 +1,7 @@
 package x3ui
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -75,4 +76,20 @@ func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Cli
 	sh.x3Clients[server.ID] = x3Client
 
 	return x3Client, nil
+}
+
+func (sh *ServerHandler) CreateOutbound(serverID int64) error {
+	// Define outbound configuration
+	outboundPayload := x3client.AddInboundPayload{
+		// Fill in required fields
+	}
+
+	// Create outbound
+	err := sh.x3Clients[serverID].AddInbound(outboundPayload)
+	if err != nil {
+		sh.logger.Error("Failed to create outbound", slog.String("error", err.Error()))
+		return fmt.Errorf("failed to create outbound: %w", err)
+	}
+
+	return nil
 }

@@ -72,3 +72,12 @@ func (db *DB) GetAdminUsers() ([]User, error) {
 	}
 	return admins, nil
 }
+
+// IsUserAdmin checks if a user is an admin
+func (db *DB) IsUserAdmin(userTelegramID int64) (bool, error) {
+	user, err := db.GetUserByTelegramID(userTelegramID)
+	if err != nil {
+		return false, err
+	}
+	return user.IsAdmin, nil
+}

@@ -33,6 +33,11 @@ func NewBot(token, sshKeyPath string, logger *slog.Logger, db *database.DB) (*Bo
 }
 
 func (b *Bot) Start() {
+	b.logger.Info("Stopping bot...")
+
+	// Notify admins about the shutdown
+	b.NotifyAdmins("⚠️ The bot is starting.")
+
 	// Use UpdatesViaLongPolling to handle updates
 	updates, err := b.bot.UpdatesViaLongPolling(nil)
 	if err != nil {
