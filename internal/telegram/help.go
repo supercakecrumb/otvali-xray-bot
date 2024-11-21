@@ -17,14 +17,8 @@ var (
 	vpnSetupText    = "Инструкция по настройке VPN:\n\n1. Шаг первый...\n2. Шаг второй...\n3. Шаг третий..."
 	invitationsText = "Чтобы поделиться доступом к боту, используйте команду /invite <username>."
 	howItWorksText  = "Описание того, как это работает:\n\nНаш сервис позволяет вам получить доступ к VPN через бота..."
-)
 
-// Handle /help command
-func (b *Bot) handleHelp(bot *telego.Bot, update telego.Update) {
-	chatID := update.Message.Chat.ID
-
-	// Create inline keyboard
-	keyboard := tu.InlineKeyboard(
+	helpKeyboard = tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton("Настройка VPN").WithCallbackData("help_vpn_setup"),
 		),
@@ -33,6 +27,20 @@ func (b *Bot) handleHelp(bot *telego.Bot, update telego.Update) {
 			tu.InlineKeyboardButton("Как это работает").WithCallbackData("help_how_it_works"),
 		),
 	)
+
+	helpBackKeyboard = tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("Назад").WithCallbackData("help_back"),
+		),
+	)
+)
+
+// Handle /help command
+func (b *Bot) handleHelp(bot *telego.Bot, update telego.Update) {
+	chatID := update.Message.Chat.ID
+
+	// Create inline keyboard
+	keyboard := helpKeyboard
 
 	msg := tu.Message(
 		tu.ID(chatID),
@@ -53,43 +61,18 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 	messageID := callbackQuery.Message.GetMessageID()
 
 	var text string
-	var keyboard *telego.InlineKeyboardMarkup
+	var keyboard *telego.InlineKeyboardMarkup = helpBackKeyboard
 
 	switch data {
 	case "help_vpn_setup":
 		text = vpnSetupText
-		keyboard = tu.InlineKeyboard(
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("Назад").WithCallbackData("help_back"),
-			),
-		)
 	case "help_invitations":
 		text = invitationsText
-		keyboard = tu.InlineKeyboard(
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("Назад").WithCallbackData("help_back"),
-			),
-		)
 	case "help_how_it_works":
 		text = howItWorksText
-		keyboard = tu.InlineKeyboard(
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("Назад").WithCallbackData("help_back"),
-			),
-		)
 	case "help_back":
 		text = helpMessage
-		keyboard = tu.InlineKeyboard(
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("Настройка VPN").WithCallbackData("help_vpn_setup"),
-			),
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("Приглашения").WithCallbackData("help_invitations"),
-			),
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("Как это работает").WithCallbackData("help_how_it_works"),
-			),
-		)
+		keyboard = helpKeyboard
 	default:
 		// Unknown callback data
 		return

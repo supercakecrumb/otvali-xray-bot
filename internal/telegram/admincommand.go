@@ -10,7 +10,11 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 )
 
-func (b *Bot) handleAddServer(bot *telego.Bot, message telego.Message) {
+func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
+	if update.Message == nil {
+		b.logger.Error("Error handling add server command", slog.String("error", "update.Message == nil"))
+	}
+	message := update.Message
 	chatID := message.Chat.ID
 	userID := message.From.ID
 
@@ -18,14 +22,14 @@ func (b *Bot) handleAddServer(bot *telego.Bot, message telego.Message) {
 	isAdmin, err := b.db.IsUserAdmin(userID)
 	if err != nil || !isAdmin {
 		msg := tu.Message(tu.ID(chatID), "У вас нет прав для выполнения этой команды.")
-		_, _ = b.bot.SendMessage(msg)
+		_, _ = bot.SendMessage(msg)
 		return
 	}
 
 	args := strings.Fields(message.Text)
 	if len(args) < 10 {
 		msg := tu.Message(tu.ID(chatID), "Использование: /add_server <Name> <Country> <City> <IP> <SSHPort> <SSHUser> <APIPort> <Username> <Password> [OutboundID] [IsExclusive]")
-		_, _ = b.bot.SendMessage(msg)
+		_, _ = bot.SendMessage(msg)
 		return
 	}
 
@@ -81,7 +85,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, message telego.Message) {
 	if err := b.db.AddServer(server); err != nil {
 		b.logger.Error("Failed to add server", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Не удалось добавить сервер.")
-		_, _ = b.bot.SendMessage(msg)
+		_, _ = bot.SendMessage(msg)
 		return
 	}
 
@@ -90,7 +94,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, message telego.Message) {
 	if err != nil {
 		b.logger.Error("Failed to connect to server", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Не удалось подключиться к серверу.")
-		_, _ = b.bot.SendMessage(msg)
+		_, _ = bot.SendMessage(msg)
 		return
 	}
 
@@ -100,7 +104,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, message telego.Message) {
 		if err != nil {
 			b.logger.Error("Failed to create outbound", slog.String("error", err.Error()))
 			msg := tu.Message(tu.ID(chatID), "Не удалось создать исходящий прокси.")
-			_, _ = b.bot.SendMessage(msg)
+			_, _ = bot.SendMessage(msg)
 			return
 		}
 		// Update server with new OutboundID
@@ -112,5 +116,5 @@ func (b *Bot) handleAddServer(bot *telego.Bot, message telego.Message) {
 	}
 
 	msg := tu.Message(tu.ID(chatID), "Сервер успешно добавлен и настроен.")
-	_, _ = b.bot.SendMessage(msg)
+	_, _ = bot.SendMessage(msg)
 }
