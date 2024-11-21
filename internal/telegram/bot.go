@@ -49,14 +49,8 @@ func (b *Bot) Start() {
 	// Middleware in case of panic and no username
 	b.bh.Use(
 		th.PanicRecovery(),
-		func(bot *telego.Bot, update telego.Update, next th.Handler) {
-			b.logger.Debug("Ensuring that user has username")
-			if update.Message != nil && update.Message.From != nil && update.Message.From.Username == "" {
-				bot.SendMessage(markdownMessage(update.Message.Chat.ChatID(), noUsernameResponse))
-				return
-			}
-			next(bot, update)
-		},
+		b.userUsernameMiddleware(),
+		b.userDatabaseMiddleware(),
 	)
 
 	b.bh.Start()

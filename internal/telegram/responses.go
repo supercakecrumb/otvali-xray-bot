@@ -7,3 +7,5 @@ var CommandResponses = map[string]string{
 }
 
 var noUsernameResponse = "Ты не можешь пользоваться ботом пока у тебя нет имени пользователя. [Как это сделать](https://tinyurl.com/4hjse9w4)"
+
+var youMustBeInvitedResponse = "Сначала тебя должен пригласить один из пользователей этого бота."
