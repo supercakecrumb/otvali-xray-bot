@@ -28,7 +28,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 
 	args := strings.Fields(message.Text)
 	if len(args) < 10 {
-		msg := tu.Message(tu.ID(chatID), "Использование: /add_server <Name> <Country> <City> <IP> <SSHPort> <SSHUser> <APIPort> <Username> <Password> [OutboundID] [IsExclusive]")
+		msg := tu.Message(tu.ID(chatID), "Использование: /add_server <Name> <Country> <City> <IP> <SSHPort> <SSHUser> <APIPort> <Username> <Password> [InboundID] [IsExclusive]")
 		_, _ = bot.SendMessage(msg)
 		return
 	}
@@ -51,14 +51,14 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 	}
 	username := args[8]
 	password := args[9]
-	var outboundID *int
+	var inboundID *int
 	if len(args) >= 11 {
 		id, err := strconv.Atoi(args[10])
 		if err != nil {
-			b.logger.Error("Invalid OutboundID", slog.String("error", err.Error()))
+			b.logger.Error("Invalid InboundID", slog.String("error", err.Error()))
 			return
 		}
-		outboundID = &id
+		inboundID = &id
 	}
 	isExclusive := false
 	if len(args) >= 12 {
@@ -77,7 +77,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		APIPort:     apiPort,
 		Username:    username,
 		Password:    password,
-		OutboundID:  outboundID,
+		InboundID:   inboundID,
 		IsExclusive: isExclusive,
 	}
 
@@ -98,21 +98,19 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		return
 	}
 
-	// If OutboundID is nil, create an outbound
-	if server.OutboundID == nil {
-		err := b.serverHandler.CreateOutbound(server.ID)
+	// If InboundID is nil, create an inbound
+	if server.InboundID == nil {
+		inbound, err := b.serverHandler.CreateInbound(server)
 		if err != nil {
-			b.logger.Error("Failed to create outbound", slog.String("error", err.Error()))
+			b.logger.Error("Failed to create inbound", slog.String("error", err.Error()))
 			msg := tu.Message(tu.ID(chatID), "Не удалось создать исходящий прокси.")
 			_, _ = bot.SendMessage(msg)
 			return
 		}
-		// Update server with new OutboundID
-		// TODO
-		// server.OutboundID = &outboundID
-		// if err := b.db.UpdateServerOutboundID(server.ID, outboundID); err != nil {
-		// 	b.logger.Error("Failed to update server outbound ID", slog.String("error", err.Error()))
-		// }
+		// Update server with new InboundID
+		if err := b.db.UpdateServerInboundID(server.ID, inbound.ID); err != nil {
+			b.logger.Error("Failed to update server inbound ID", slog.String("error", err.Error()))
+		}
 	}
 
 	msg := tu.Message(tu.ID(chatID), "Сервер успешно добавлен и настроен.")

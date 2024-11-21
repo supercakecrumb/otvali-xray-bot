@@ -17,17 +17,18 @@ type User struct {
 
 // Server represents a VPN server configuration
 type Server struct {
-	ID          int64     `gorm:"primaryKey;autoIncrement"`
-	Name        string    `gorm:"unique;not null"`
-	Country     string    `gorm:"not null"`
-	City        string    `gorm:"not null"`
-	IP          string    `gorm:"not null"`
-	SSHPort     int       `gorm:"not null"`
-	SSHUser     string    `gorm:"not null"`
-	APIPort     int       `gorm:"not null"`
-	Username    string    `gorm:"not null"`
-	Password    string    `gorm:"not null"`
-	OutboundID  *int      `gorm:""`              // Nullable if outbound ID is not provided
-	IsExclusive bool      `gorm:"default:false"` // Indicates if the server is exclusive
-	CreatedAt   time.Time `gorm:"autoCreateTime"`
+	ID           int64     `gorm:"primaryKey;autoIncrement"`
+	Name         string    `gorm:"unique;not null"`
+	Country      string    `gorm:"not null"`
+	City         string    `gorm:"not null"`
+	IP           string    `gorm:"not null"`
+	SSHPort      int       `gorm:"not null"`
+	SSHUser      string    `gorm:"not null"`
+	APIPort      int       `gorm:"not null"`
+	Username     string    `gorm:"not null"`
+	Password     string    `gorm:"not null"`
+	RealityCover string    `gorm:"not null"`
+	InboundID    *int      `gorm:""`              // Nullable if outbound ID is not provided
+	IsExclusive  bool      `gorm:"default:false"` // Indicates if the server is exclusive
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
 }
