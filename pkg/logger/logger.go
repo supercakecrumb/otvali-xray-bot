@@ -13,7 +13,7 @@ func New(level string) *slog.Logger {
 	case "info":
 		logLevel = slog.LevelInfo
 	default:
-		logLevel = slog.LevelInfo
+		logLevel = slog.LevelDebug
 	}
 
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})

@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:15
+    container_name: telegram_bot_db
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: botpassword
+      POSTGRES_DB: botdb
+    ports:
+      - "5432:5432" # Expose PostgreSQL on the default port
+    volumes:
+      - db_data:/var/lib/postgresql/data # Persistent storage
+
+volumes:
+  db_data:
+
