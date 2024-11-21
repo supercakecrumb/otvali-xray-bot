@@ -53,5 +53,7 @@ func (b *Bot) Start() {
 		b.userDatabaseMiddleware(),
 	)
 
+	b.registerCommands()
+
 	b.bh.Start()
 }
