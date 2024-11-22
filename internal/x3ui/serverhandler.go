@@ -3,6 +3,7 @@ package x3ui
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 
 	x3client "github.com/supercakecrumb/go-x3ui/client"
@@ -20,6 +21,7 @@ type ServerHandler struct {
 	x3Clients  map[int64]*x3client.Client // Map of server ID to x3ui client
 	sshClients map[int64]*ssh.Client      // Map of server ID to SSH client
 	localPorts map[int64]int              // Map of server ID to local port
+	listeners  map[int64]net.Listener     // Map of server ID to Listener
 	mutex      sync.Mutex
 	logger     *slog.Logger
 }
@@ -30,6 +32,7 @@ func NewServerHandler(sshKeyPath string, logger *slog.Logger) *ServerHandler {
 		x3Clients:  make(map[int64]*x3client.Client),
 		sshClients: make(map[int64]*ssh.Client),
 		localPorts: make(map[int64]int),
+		listeners:  make(map[int64]net.Listener),
 		logger:     logger,
 	}
 }
@@ -38,11 +41,36 @@ func (sh *ServerHandler) Close() {
 	sh.mutex.Lock()
 	defer sh.mutex.Unlock()
 
-	for id, sshClient := range sh.sshClients {
-		sshClient.Close()
+	for id := range sh.sshClients {
+		// Close the listener first
+		if listener, exists := sh.listeners[id]; exists {
+			err := listener.Close()
+			if err != nil {
+				sh.logger.Error("Failed to close listener", slog.Int64("server_id", id), slog.String("error", err.Error()))
+			} else {
+				sh.logger.Info("Listener closed", slog.Int64("server_id", id))
+			}
+			delete(sh.listeners, id)
+		}
+
+		// Close the SSH client
+		sshClient := sh.sshClients[id]
+		err := sshClient.Close()
+		if err != nil {
+			sh.logger.Error("Failed to close SSH client", slog.Int64("server_id", id), slog.String("error", err.Error()))
+		} else {
+			sh.logger.Info("SSH client closed", slog.Int64("server_id", id))
+		}
 		delete(sh.sshClients, id)
+
+		// Remove the x3client.Client
 		delete(sh.x3Clients, id)
 	}
+
+	// Optionally, clear the maps
+	sh.sshClients = make(map[int64]*ssh.Client)
+	sh.listeners = make(map[int64]net.Listener)
+	sh.x3Clients = make(map[int64]*x3client.Client)
 }
 
 func (sh *ServerHandler) GetClient(server *database.Server) (*x3client.Client, error) {

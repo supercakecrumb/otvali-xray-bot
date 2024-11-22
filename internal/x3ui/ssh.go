@@ -59,6 +59,11 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 	}
 	sh.logger.Info("Local listener started", slog.String("address", localAddr))
 
+	// Store the listener
+	sh.mutex.Lock()
+	sh.listeners[server.ID] = listener
+	sh.mutex.Unlock()
+
 	remoteAddr := fmt.Sprintf("localhost:%v", server.APIPort)
 
 	// Start forwarding connections
@@ -95,39 +100,87 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 	return client, localPort, nil
 }
 
-// runTunnel forwards data between local and remote connections
-func (sh *ServerHandler) runTunnel(local, remote net.Conn) {
-	defer local.Close()
-	defer remote.Close()
+func (sh *ServerHandler) runTunnel(localConn, remoteConn net.Conn) {
+	defer localConn.Close()
+	defer remoteConn.Close()
+
+	// Channel to signal completion
 	done := make(chan struct{}, 2)
 
+	// Copy data from local to remote
 	go func() {
-		_, err := io.Copy(local, remote)
-		if err != nil {
-			sh.logger.Error("Error copying data from remote to local", slog.String("error", err.Error()))
-		}
-		done <- struct{}{}
-	}()
-
-	go func() {
-		_, err := io.Copy(remote, local)
-		if err != nil {
+		_, err := io.Copy(remoteConn, localConn)
+		if err != nil && !isClosedNetworkError(err) {
 			sh.logger.Error("Error copying data from local to remote", slog.String("error", err.Error()))
 		}
 		done <- struct{}{}
 	}()
 
+	// Copy data from remote to local
+	go func() {
+		_, err := io.Copy(localConn, remoteConn)
+		if err != nil && !isClosedNetworkError(err) {
+			sh.logger.Error("Error copying data from remote to local", slog.String("error", err.Error()))
+		}
+		done <- struct{}{}
+	}()
+
+	// Wait for both copy operations to finish
 	<-done
+	<-done
+
 	sh.logger.Debug("Tunnel closed")
+}
+
+func isClosedNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if opErr, ok := err.(*net.OpError); ok {
+		if opErr.Err.Error() == "use of closed network connection" {
+			return true
+		}
+	}
+	return false
 }
 
 // createSshConfig creates the SSH client configuration
 func (sh *ServerHandler) createSshConfig(username, keyFile string) (*ssh.ClientConfig, error) {
-	knownHostsPath := sshConfigPath("known_hosts")
+	knownHostsPath, err := sh.sshConfigPath("known_hosts")
+	if err != nil {
+		sh.logger.Error("Failed to setup known_hosts file", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("failed to setup known_hosts file: %w", err)
+	}
 	knownHostsCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
 		sh.logger.Error("Error loading known_hosts", slog.String("path", knownHostsPath), slog.String("error", err.Error()))
 		return nil, fmt.Errorf("error loading known_hosts: %w", err)
+	}
+
+	// Wrap the callback to handle unknown keys
+	hostKeyCallback := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := knownHostsCallback(hostname, remote, key)
+		if err != nil {
+			sh.logger.Warn("Unknown host key, adding to known_hosts", slog.String("host", hostname))
+
+			// Append the new key to the known_hosts file
+			entry := knownhosts.Line([]string{hostname}, key)
+			file, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				sh.logger.Error("Failed to open known_hosts for writing", slog.String("path", knownHostsPath), slog.String("error", err.Error()))
+				return err
+			}
+			defer file.Close()
+
+			if _, err := file.WriteString(entry + "\n"); err != nil {
+				sh.logger.Error("Failed to write new key to known_hosts", slog.String("path", knownHostsPath), slog.String("error", err.Error()))
+				return err
+			}
+
+			sh.logger.Info("Added new host key to known_hosts", slog.String("host", hostname))
+			return nil
+		}
+		return err
 	}
 
 	key, err := os.ReadFile(keyFile)
@@ -149,14 +202,43 @@ func (sh *ServerHandler) createSshConfig(username, keyFile string) (*ssh.ClientC
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback: ssh.HostKeyCallback(knownHostsCallback),
+		HostKeyCallback: hostKeyCallback,
 		// HostKeyAlgorithms: []string{ssh.KeyAlgoED25519}, // Uncomment if needed
 	}, nil
 }
 
 // sshConfigPath constructs the path to the SSH configuration file
-func sshConfigPath(filename string) string {
-	return filepath.Join(os.Getenv("HOME"), ".ssh", filename)
+func (sh *ServerHandler) sshConfigPath(filename string) (string, error) {
+	// Get the current directory
+	currentDir, err := os.Getwd()
+	if err != nil {
+		sh.logger.Error("Failed to get current directory", slog.String("error", err.Error()))
+		return "", fmt.Errorf("unable to get current directory: %w", err)
+	}
+
+	// Full path to the file
+	filePath := filepath.Join(currentDir, filename)
+
+	// Check if the file exists
+	_, err = os.Stat(filePath)
+	if os.IsNotExist(err) {
+		// Create the file if it does not exist
+		file, err := os.Create(filePath)
+		if err != nil {
+			sh.logger.Error("Failed to create file", slog.String("filename", filename), slog.String("error", err.Error()))
+			return "", fmt.Errorf("unable to create %s file: %w", filename, err)
+		}
+		defer file.Close()
+
+		// Add a comment to indicate it's a known_hosts file
+		if _, err := file.WriteString("# SSH known_hosts file\n"); err != nil {
+			sh.logger.Error("Failed to write initial content to file", slog.String("filename", filename), slog.String("error", err.Error()))
+			return "", fmt.Errorf("failed to write initial content to %s: %w", filename, err)
+		}
+		sh.logger.Info("Created new known_hosts file", slog.String("path", filePath))
+	}
+
+	return filePath, nil
 }
 
 // findLocalPort finds the first available local port starting from the given start port.

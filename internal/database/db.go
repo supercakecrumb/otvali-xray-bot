@@ -1,9 +1,10 @@
 package database
 
 import (
+	"log/slog"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"log/slog"
 )
 
 type DB struct {
@@ -23,7 +24,10 @@ func NewDB(connectionString string, logger *slog.Logger) (*DB, error) {
 		logger.Error("Failed to migrate database schema", slog.String("error", err.Error()))
 		return nil, err
 	}
+	if err := db.AutoMigrate(&Server{}); err != nil {
+		logger.Error("Failed to migrate database schema", slog.String("error", err.Error()))
+		return nil, err
+	}
 
 	return &DB{Conn: db}, nil
 }
-

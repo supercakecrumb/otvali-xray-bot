@@ -33,7 +33,7 @@ func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x
 }
 
 func (b *Bot) Start() {
-	b.logger.Info("Stopping bot...")
+	b.logger.Info("Starting bot...")
 
 	// Notify admins about the shutdown
 	b.NotifyAdmins("⚠️ The bot is starting.")

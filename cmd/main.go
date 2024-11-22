@@ -44,7 +44,7 @@ func main() {
 
 	// Start the bot in a separate goroutine
 	go func() {
-		log.Info("Bot started")
+		log.Info("Bot is starting...")
 		bot.Start()
 	}()
 
