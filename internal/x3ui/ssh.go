@@ -83,7 +83,7 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 					return // Exit the goroutine
 				}
 
-				if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				if _, ok := err.(net.Error); ok {
 					sh.logger.Warn("Temporary error accepting local connection", slog.String("error", err.Error()))
 					continue
 				}
