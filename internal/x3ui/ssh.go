@@ -1,6 +1,7 @@
 package x3ui
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -66,11 +67,9 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 	sh.logger.Info("Local listener started", slog.String("address", localAddr))
 
 	// Store the listener
-	sh.logger.Debug("Attempting to store listener in map", slog.Int64("server_id", server.ID))
 	sh.mutex.Lock()
 	sh.listeners[server.ID] = listener
 	sh.mutex.Unlock()
-	sh.logger.Debug("Listener stored successfully", slog.Int64("server_id", server.ID))
 
 	remoteAddr := fmt.Sprintf("localhost:%v", server.APIPort)
 
@@ -79,7 +78,17 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 		for {
 			localConn, err := listener.Accept()
 			if err != nil {
-				sh.logger.Error("Error accepting local connection", slog.String("error", err.Error()))
+				if errors.Is(err, net.ErrClosed) {
+					sh.logger.Info("Listener closed, stopping accept loop")
+					return // Exit the goroutine
+				}
+
+				if ne, ok := err.(net.Error); ok && ne.Temporary() {
+					sh.logger.Warn("Temporary error accepting local connection", slog.String("error", err.Error()))
+					continue
+				}
+
+				sh.logger.Error("Unexpected error accepting local connection", slog.String("error", err.Error()))
 				continue
 			}
 			sh.logger.Debug("Accepted local connection", slog.String("local_addr", localConn.RemoteAddr().String()))

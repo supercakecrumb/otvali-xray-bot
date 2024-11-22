@@ -115,9 +115,11 @@ func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Cli
 	}
 
 	// Store both sshClient and x3Client
+	sh.mutex.Lock()
 	sh.sshClients[server.ID] = sshClient
 	sh.x3Clients[server.ID] = x3Client
 	sh.localPorts[server.ID] = localPort
+	sh.mutex.Unlock()
 
 	return x3Client, nil
 }
