@@ -19,6 +19,7 @@ type ServerHandler struct {
 	SSHKeyPath string
 	x3Clients  map[int64]*x3client.Client // Map of server ID to x3ui client
 	sshClients map[int64]*ssh.Client      // Map of server ID to SSH client
+	localPorts map[int64]int              // Map of server ID to local port
 	mutex      sync.Mutex
 	logger     *slog.Logger
 }
@@ -28,6 +29,7 @@ func NewServerHandler(sshKeyPath string, logger *slog.Logger) *ServerHandler {
 		SSHKeyPath: sshKeyPath,
 		x3Clients:  make(map[int64]*x3client.Client),
 		sshClients: make(map[int64]*ssh.Client),
+		localPorts: make(map[int64]int),
 		logger:     logger,
 	}
 }
@@ -63,7 +65,7 @@ func (sh *ServerHandler) GetClient(server *database.Server) (*x3client.Client, e
 
 func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Client, error) {
 	// Use the SSHKeyPath from ServerHandler to connect via SSH
-	sshClient, localPort, err := StartSSHPortForward(sh.SSHKeyPath, server)
+	sshClient, localPort, err := sh.startSSHPortForward(server)
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +81,7 @@ func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Cli
 	// Store both sshClient and x3Client
 	sh.sshClients[server.ID] = sshClient
 	sh.x3Clients[server.ID] = x3Client
+	sh.localPorts[server.ID] = localPort
 
 	return x3Client, nil
 }

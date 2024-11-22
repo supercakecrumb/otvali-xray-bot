@@ -18,7 +18,7 @@ type Bot struct {
 	serverHandler *x3ui.ServerHandler
 }
 
-func NewBot(token, sshKeyPath string, logger *slog.Logger, db *database.DB) (*Bot, error) {
+func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x3ui.ServerHandler) (*Bot, error) {
 	bot, err := telego.NewBot(token)
 	if err != nil {
 		return nil, err
@@ -28,7 +28,7 @@ func NewBot(token, sshKeyPath string, logger *slog.Logger, db *database.DB) (*Bo
 		bot:           bot,
 		logger:        logger,
 		db:            db,
-		serverHandler: x3ui.NewServerHandler(sshKeyPath, logger),
+		serverHandler: serverHandler,
 	}, nil
 }
 
@@ -63,6 +63,8 @@ func (b *Bot) Start() {
 	)
 
 	b.registerCommands()
+
+	b.registerAdminCommands()
 
 	b.bh.Start()
 }

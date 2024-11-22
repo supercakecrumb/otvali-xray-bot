@@ -28,8 +28,11 @@ func main() {
 		return
 	}
 
+	// Initialize server Handler
+	serverHandler := x3ui.NewServerHandler(cfg.SSHKeyPath, log)
+
 	// Start the bot
-	bot, err := telegram.NewBot(cfg.TelegramToken, cfg.SSHKeyPath, log, db)
+	bot, err := telegram.NewBot(cfg.TelegramToken, log, db, serverHandler)
 	if err != nil {
 		log.Error("Failed to initialize bot", slog.String("error", err.Error()))
 		return
@@ -38,9 +41,6 @@ func main() {
 	// Create a context that is cancelled on OS interrupt or terminate signal
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	// Initialize ServerHandler
-	serverHandler := x3ui.NewServerHandler(cfg.SSHKeyPath, log)
 
 	// Start the bot in a separate goroutine
 	go func() {

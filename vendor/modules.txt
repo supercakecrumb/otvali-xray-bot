@@ -127,6 +127,9 @@ github.com/mymmrac/telego/telegoutil
 github.com/savsgio/gotils/bytes
 github.com/savsgio/gotils/strconv
 github.com/savsgio/gotils/strings
+# github.com/skeema/knownhosts v1.3.0
+## explicit; go 1.17
+github.com/skeema/knownhosts
 # github.com/supercakecrumb/go-x3ui v0.0.1
 ## explicit; go 1.23.3
 github.com/supercakecrumb/go-x3ui/client
@@ -174,6 +177,7 @@ golang.org/x/crypto/internal/poly1305
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/ssh
 golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
+golang.org/x/crypto/ssh/knownhosts
 # golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f
 ## explicit; go 1.22.0
 golang.org/x/exp/rand

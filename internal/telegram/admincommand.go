@@ -8,9 +8,16 @@ import (
 	"strings"
 
 	"github.com/mymmrac/telego"
+	th "github.com/mymmrac/telego/telegohandler"
 	tu "github.com/mymmrac/telego/telegoutil"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 )
+
+func (b *Bot) registerAdminCommands() {
+	b.bh.Handle(b.handleAddServer, th.CommandEqual("add_server"))
+	b.bh.Handle(b.handleListServers, th.CommandEqual("list_servers"))
+	b.bh.Handle(b.handleServerExclusivity, th.CommandEqual("server_exclusivity"))
+}
 
 func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 	if update.Message == nil {

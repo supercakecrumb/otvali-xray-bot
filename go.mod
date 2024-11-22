@@ -2,7 +2,10 @@ module github.com/supercakecrumb/otvali-xray-bot
 
 go 1.23.3
 
-require github.com/mymmrac/telego v0.31.4
+require (
+	github.com/mymmrac/telego v0.31.4
+	github.com/skeema/knownhosts v1.3.0
+)
 
 require (
 	github.com/go-resty/resty/v2 v2.16.0 // indirect

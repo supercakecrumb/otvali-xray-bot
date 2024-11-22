@@ -3,72 +3,132 @@ package x3ui
 import (
 	"fmt"
 	"io"
+	"log"
+	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 
+	"github.com/skeema/knownhosts"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 	"golang.org/x/crypto/ssh"
 )
 
+var localPortSearchStart = 10000
+
 // StartSSHPortForward sets up an SSH connection with port forwarding using SSH key authentication
-func StartSSHPortForward(sshKeyPath string, server *database.Server) (*ssh.Client, int, error) {
-	// Read private key file
-	key, err := os.ReadFile(sshKeyPath)
+func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Client, int, error) {
+	addr := fmt.Sprintf("%s:%v", server.IP, server.SSHPort)
+	username := server.Username
+	remoteURL := fmt.Sprintf("localhost:%v", server.APIPort)
+
+	localPort, err := findLocalPort(localPortSearchStart)
 	if err != nil {
-		return nil, 0, fmt.Errorf("unable to read private key: %w", err)
+		sh.logger.Error("Error finding local port", slog.String("err", err.Error()))
+		return nil, 0, fmt.Errorf("error finding local port: %v", err)
 	}
 
-	// Create signer for key
+	config := sh.createSshConfig(username, sh.SSHKeyPath)
+
+	client, err := ssh.Dial("tcp", addr, config)
+	if err != nil {
+		sh.logger.Error("Error creating ssh client", slog.String("addr", addr), slog.String("err", err.Error()))
+		return nil, 0, fmt.Errorf("error creating ssh client: %v", err)
+	}
+	defer client.Close()
+
+	listener, err := client.Listen("tcp", remoteURL)
+	if err != nil {
+		sh.logger.Error("Error listening api", slog.String("remoteURL", remoteURL), slog.String("err", err.Error()))
+		return nil, 0, fmt.Errorf("error listening api: %v", err)
+	}
+	defer listener.Close()
+
+	for {
+		remote, err := listener.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		go func() {
+			local, err := net.Dial("tcp", fmt.Sprintf("localhost:%v", localPort))
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Println("tunnel established with", local.LocalAddr())
+			sh.runTunnel(local, remote)
+		}()
+	}
+}
+
+// runTunnel runs a tunnel between two connections; as soon as one connection
+// reaches EOF or reports an error, both connections are closed and this
+// function returns.
+func (sh *ServerHandler) runTunnel(local, remote net.Conn) {
+	defer local.Close()
+	defer remote.Close()
+	done := make(chan struct{}, 2)
+
+	go func() {
+		io.Copy(local, remote)
+		done <- struct{}{}
+	}()
+
+	go func() {
+		io.Copy(remote, local)
+		done <- struct{}{}
+	}()
+
+	<-done
+}
+
+func (sh *ServerHandler) createSshConfig(username, keyFile string) *ssh.ClientConfig {
+	knownHostsCallback, err := knownhosts.New(sshConfigPath("known_hosts"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	key, err := os.ReadFile(keyFile)
+	if err != nil {
+		log.Fatalf("unable to read private key: %v", err)
+	}
+
+	// Create the Signer for this private key.
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return nil, 0, fmt.Errorf("unable to parse private key: %w", err)
+		log.Fatalf("unable to parse private key: %v", err)
 	}
 
-	config := &ssh.ClientConfig{
-		User: server.SSHUser,
+	// An SSH client is represented with a ClientConn.
+	//
+	// To authenticate with the remote server you must pass at least one
+	// implementation of AuthMethod via the Auth field in ClientConfig,
+	// and provide a HostKeyCallback.
+	return &ssh.ClientConfig{
+		User: username,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Use proper host key verification in production
+		HostKeyCallback:   ssh.HostKeyCallback(knownHostsCallback),
+		HostKeyAlgorithms: []string{ssh.KeyAlgoED25519},
 	}
+}
 
-	// Establish SSH connection
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", server.IP, server.SSHPort), config)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to dial SSH: %w", err)
-	}
+func sshConfigPath(filename string) string {
+	return filepath.Join(os.Getenv("HOME"), ".ssh", filename)
+}
 
-	// Set up port forwarding from localPort to server.APIPort
-	// Use ":0" to let the OS choose an available port
-	listener, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to listen on local port: %w", err)
-	}
-
-	localPort := listener.Addr().(*net.TCPAddr).Port
-	remoteAddr := fmt.Sprintf("localhost:%d", server.APIPort)
-
-	go func() {
-		for {
-			localConn, err := listener.Accept()
-			if err != nil {
-				continue
-			}
-			remoteConn, err := conn.Dial("tcp", remoteAddr)
-			if err != nil {
-				localConn.Close()
-				continue
-			}
-			go func() {
-				defer localConn.Close()
-				defer remoteConn.Close()
-				go func() {
-					_, _ = io.Copy(localConn, remoteConn)
-				}()
-				_, _ = io.Copy(remoteConn, localConn)
-			}()
+// findLocalPort finds the first available local port starting from the given start port.
+func findLocalPort(start int) (int, error) {
+	for port := start; port <= 65535; port++ {
+		address := fmt.Sprintf("127.0.0.1:%d", port)
+		ln, err := net.Listen("tcp", address)
+		if err == nil {
+			// Successfully bound to the port, it is available
+			_ = ln.Close()
+			return port, nil
 		}
-	}()
-
-	return conn, localPort, nil
+	}
+	return 0, fmt.Errorf("no available ports found starting from %d", start)
 }
