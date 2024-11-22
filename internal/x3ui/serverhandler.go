@@ -65,7 +65,7 @@ func (sh *ServerHandler) GetClient(server *database.Server) (*x3client.Client, e
 
 func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Client, error) {
 	// Use the SSHKeyPath from ServerHandler to connect via SSH
-	sshClient, localPort, err := sh.startSSHPortForward(server)
+	sshClient, localPort, err := sh.StartSSHPortForward(server)
 	if err != nil {
 		return nil, err
 	}
