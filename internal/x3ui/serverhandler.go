@@ -77,21 +77,16 @@ func (sh *ServerHandler) Close() {
 		// Remove the x3client.Client
 		delete(sh.x3Clients, id)
 	}
-
-	// Optionally, clear the maps
-	sh.sshClients = make(map[int64]*ssh.Client)
-	sh.listeners = make(map[int64]net.Listener)
-	sh.x3Clients = make(map[int64]*x3client.Client)
 }
 
 func (sh *ServerHandler) GetClient(server *database.Server) (*x3client.Client, error) {
-	sh.mutex.Lock()
-	defer sh.mutex.Unlock()
 
 	// Check if client already exists
+	sh.mutex.Lock()
 	if client, exists := sh.x3Clients[server.ID]; exists {
 		return client, nil
 	}
+	sh.mutex.Unlock()
 
 	// Establish SSH connection and create x3ui client
 	client, err := sh.connectToServer(server)
@@ -104,12 +99,14 @@ func (sh *ServerHandler) GetClient(server *database.Server) (*x3client.Client, e
 
 func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Client, error) {
 	// Use the SSHKeyPath from ServerHandler to connect via SSH
+	sh.logger.Debug("Starting ssh port forwarding", slog.String("server", server.Name))
 	sshClient, localPort, err := sh.StartSSHPortForward(server)
 	if err != nil {
 		return nil, err
 	}
 
 	// Initialize x3ui client with server credentials
+	sh.logger.Debug("Initializing x3ui client", slog.String("server", server.Name))
 	x3Client, err := InitializeX3uiClient(localPort, server.Username, server.Password, sh.logger)
 	if err != nil {
 		// Close the SSH client if x3Client initialization failed

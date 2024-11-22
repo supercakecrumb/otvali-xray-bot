@@ -18,6 +18,12 @@ var localPortSearchStart = 10000
 
 // StartSSHPortForward sets up an SSH connection with port forwarding using SSH key authentication
 func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Client, int, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			sh.logger.Error("Recovered from panic", slog.Any("panic", r))
+		}
+	}()
+
 	sh.logger.Info("Starting SSH port forwarding",
 		slog.String("server_ip", server.IP),
 		slog.Int("ssh_port", server.SSHPort),
@@ -60,9 +66,11 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 	sh.logger.Info("Local listener started", slog.String("address", localAddr))
 
 	// Store the listener
+	sh.logger.Debug("Attempting to store listener in map", slog.Int64("server_id", server.ID))
 	sh.mutex.Lock()
 	sh.listeners[server.ID] = listener
 	sh.mutex.Unlock()
+	sh.logger.Debug("Listener stored successfully", slog.Int64("server_id", server.ID))
 
 	remoteAddr := fmt.Sprintf("localhost:%v", server.APIPort)
 
