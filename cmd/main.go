@@ -28,8 +28,17 @@ func main() {
 		return
 	}
 
+	servers, err := db.GetAllServers()
+	if err != nil {
+		log.Error("Error getting servers", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 	// Initialize server Handler
-	serverHandler := x3ui.NewServerHandler(cfg.SSHKeyPath, log)
+	serverHandler := x3ui.NewServerHandler(cfg.SSHKeyPath, servers, log)
+	if serverHandler == nil {
+		log.Error("Failed to init serverHandler")
+		os.Exit(1)
+	}
 
 	// Start the bot
 	bot, err := telegram.NewBot(cfg.TelegramToken, log, db, serverHandler)

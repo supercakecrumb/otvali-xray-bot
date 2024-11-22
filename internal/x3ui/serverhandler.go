@@ -26,8 +26,8 @@ type ServerHandler struct {
 	logger     *slog.Logger
 }
 
-func NewServerHandler(sshKeyPath string, logger *slog.Logger) *ServerHandler {
-	return &ServerHandler{
+func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog.Logger) *ServerHandler {
+	sh := ServerHandler{
 		SSHKeyPath: sshKeyPath,
 		x3Clients:  make(map[int64]*x3client.Client),
 		sshClients: make(map[int64]*ssh.Client),
@@ -35,6 +35,17 @@ func NewServerHandler(sshKeyPath string, logger *slog.Logger) *ServerHandler {
 		listeners:  make(map[int64]net.Listener),
 		logger:     logger,
 	}
+
+	for _, server := range servers {
+		// Connect to the server and set up the x3ui client
+		_, err := sh.GetClient(&server)
+		if err != nil {
+			logger.Error("Failed to connect to server", slog.String("error", err.Error()))
+			return nil
+		}
+	}
+
+	return &sh
 }
 
 func (sh *ServerHandler) Close() {
