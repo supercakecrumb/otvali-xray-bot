@@ -11,11 +11,11 @@ import (
 )
 
 type Bot struct {
-	bot           *telego.Bot
-	logger        *slog.Logger
-	db            *database.DB
-	bh            *th.BotHandler
-	serverHandler *x3ui.ServerHandler
+	bot    *telego.Bot
+	logger *slog.Logger
+	db     *database.DB
+	bh     *th.BotHandler
+	sh     *x3ui.ServerHandler
 }
 
 func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x3ui.ServerHandler) (*Bot, error) {
@@ -25,10 +25,10 @@ func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x
 	}
 
 	return &Bot{
-		bot:           bot,
-		logger:        logger,
-		db:            db,
-		serverHandler: serverHandler,
+		bot:    bot,
+		logger: logger,
+		db:     db,
+		sh:     serverHandler,
 	}, nil
 }
 

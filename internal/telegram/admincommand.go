@@ -91,7 +91,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 	}
 
 	// Connect to the server and set up the x3ui client
-	_, err = b.serverHandler.GetClient(server)
+	_, err = b.sh.AddClient(server)
 	if err != nil {
 		b.logger.Error("Failed to connect to server", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Не удалось подключиться к серверу.")
@@ -101,7 +101,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 
 	// If InboundID is nil, create an inbound
 	if server.InboundID == nil {
-		inbound, err := b.serverHandler.CreateInbound(server)
+		inbound, err := b.sh.CreateInbound(server)
 		if err != nil {
 			b.logger.Error("Failed to create inbound", slog.String("error", err.Error()))
 			msg := tu.Message(tu.ID(chatID), "Не удалось создать исходящий прокси.")
@@ -161,8 +161,8 @@ func (b *Bot) handleListServers(bot *telego.Bot, update telego.Update) {
 	sb.WriteString("Список серверов:\n\n")
 	for _, server := range servers {
 		sb.WriteString(fmt.Sprintf(
-			"ID: %d\nИмя: %s\nСтрана: %s\nГород: %s\nIP: %s\nПорт SSH: %d\nAPI Порт: %d\nИсключительный: %t\n\n",
-			server.ID, server.Name, server.Country, server.City, server.IP, server.SSHPort, server.APIPort, server.IsExclusive,
+			"ID: %d\nИмя: %s\nСтрана: %s\nГород: %s\nIP: %s\nИсключительный: %t\n\n",
+			server.ID, server.Name, server.Country, server.City, server.IP, server.IsExclusive,
 		))
 	}
 

@@ -130,7 +130,7 @@ github.com/savsgio/gotils/strings
 # github.com/skeema/knownhosts v1.3.0
 ## explicit; go 1.17
 github.com/skeema/knownhosts
-# github.com/supercakecrumb/go-x3ui v0.0.1
+# github.com/supercakecrumb/go-x3ui v0.0.2
 ## explicit; go 1.23.3
 github.com/supercakecrumb/go-x3ui/client
 # github.com/twitchyliquid64/golang-asm v0.15.1

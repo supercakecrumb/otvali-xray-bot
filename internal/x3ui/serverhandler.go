@@ -38,7 +38,7 @@ func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog
 
 	for _, server := range servers {
 		// Connect to the server and set up the x3ui client
-		_, err := sh.GetClient(&server)
+		_, err := sh.AddClient(&server)
 		if err != nil {
 			logger.Error("Failed to connect to server", slog.String("error", err.Error()))
 			return nil
@@ -79,7 +79,7 @@ func (sh *ServerHandler) Close() {
 	}
 }
 
-func (sh *ServerHandler) GetClient(server *database.Server) (*x3client.Client, error) {
+func (sh *ServerHandler) AddClient(server *database.Server) (*x3client.Client, error) {
 
 	// Check if client already exists
 	sh.mutex.Lock()
