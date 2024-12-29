@@ -122,7 +122,7 @@ func (b *Bot) generateKeyProcess(serverID int, callbackQuery *telego.CallbackQue
 		b.logger.Error("error getting server from db", slog.String("error", err.Error()))
 	}
 	// Proceed to generate the key
-	key, err := b.sh.GetClientKey(server, username)
+	key, err := b.sh.GetUserKey(server, username, chatID)
 	if err != nil {
 		cancel() // Stop the animation
 		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
