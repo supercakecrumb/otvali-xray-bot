@@ -55,7 +55,7 @@ func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 		return
 	}
 
-	invitedUsername := args[1]
+	invitedUsername := strings.ToLower(args[1])
 
 	// Check if the user already exists
 	_, err := b.db.GetUserByUsername(invitedUsername)
@@ -70,8 +70,10 @@ func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 
 	// Add the new user as invited
 	invitedUser := &database.User{
-		Username:  invitedUsername,
-		InvitedBy: &chatID,
+		Username:          invitedUsername,
+		InvitedByID:       &chatID,
+		InvitedByUsername: message.From.Username,
+		Invited:           true,
 	}
 
 	if err := b.db.AddUser(invitedUser); err != nil {

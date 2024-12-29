@@ -3,6 +3,7 @@ package telegram
 import (
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
@@ -47,7 +48,7 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 		}
 
 		telegramID := fromUser.ID
-		username := fromUser.Username
+		username := strings.ToLower(fromUser.Username)
 		b.logger.Debug("Ensuring that user is in database", slog.Int64("telegram ID", telegramID), slog.String("username", username))
 
 		// Try to get user by TelegramID
