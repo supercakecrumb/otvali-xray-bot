@@ -1,5 +1,11 @@
 package client
 
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+)
+
 type APIResponse[T any] struct {
 	Success bool   `json:"success"`
 	Msg     string `json:"msg"`
@@ -62,16 +68,16 @@ type AddInboundClientConfig struct {
 
 // InboundClient represents a single client to be added to an inbound
 type InboundClient struct {
-	ID         string `json:"id"`
-	Flow       string `json:"flow"`
-	Email      string `json:"email"`
-	LimitIP    int    `json:"limitIp"`
-	TotalGB    int    `json:"totalGB"`
-	ExpiryTime int64  `json:"expiryTime"`
-	Enable     bool   `json:"enable"`
-	TgID       int64  `json:"tgId"`
-	SubID      string `json:"subId"`
-	Reset      int    `json:"reset"`
+	ID         string        `json:"id"`
+	Flow       string        `json:"flow"`
+	Email      string        `json:"email"`
+	LimitIP    int           `json:"limitIp"`
+	TotalGB    int           `json:"totalGB"`
+	ExpiryTime int64         `json:"expiryTime"`
+	Enable     bool          `json:"enable"`
+	TgID       FlexibleInt64 `json:"tgId"`
+	SubID      string        `json:"subId"`
+	Reset      int           `json:"reset"`
 }
 
 // AddInboundPayload represents the payload for the Add Inbound API
@@ -142,4 +148,33 @@ type FetchCertificateResponse struct {
 	Success bool                `json:"success"`
 	Msg     string              `json:"msg"`
 	Obj     CertificateResponse `json:"obj"`
+}
+
+// FlexibleInt64 handles fields that could be either a string or an int64
+// It's not a great way, but this is what chatGPT created for me. It's 5 in the morning, I'm sorry.
+type FlexibleInt64 struct {
+	Value *int64
+}
+
+// UnmarshalJSON custom unmarshaler for FlexibleInt64
+func (f *FlexibleInt64) UnmarshalJSON(data []byte) error {
+	var num int64
+	if err := json.Unmarshal(data, &num); err == nil {
+		f.Value = &num
+		return nil
+	}
+
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil && str != "" {
+		parsedNum, err := strconv.ParseInt(str, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid tgId format: %s", str)
+		}
+		f.Value = &parsedNum
+		return nil
+	}
+
+	// If empty string or invalid value, set to nil
+	f.Value = nil
+	return nil
 }

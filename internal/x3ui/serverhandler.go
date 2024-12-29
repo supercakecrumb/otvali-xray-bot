@@ -97,6 +97,29 @@ func (sh *ServerHandler) AddClient(server *database.Server) (*x3client.Client, e
 	return client, nil
 }
 
+func (sh *ServerHandler) GetClientKey(server *database.Server, email string) (string, error) {
+	inbounds, err := sh.x3Clients[server.ID].ListInbounds()
+	if err != nil {
+		sh.logger.Error("error listing inbounds during getting key", slog.String("error", err.Error()))
+		return "", err
+	}
+
+	inbound := inbounds[0]
+	for i, inb := range inbounds {
+		if inb.ID == *server.InboundID {
+			inbound = inbounds[i]
+		}
+	}
+
+	key, err := x3client.GenerateVLESSLink(inbound, email)
+	if err != nil {
+		sh.logger.Error("error generating vless link", slog.String("error", err.Error()))
+		return "", err
+	}
+
+	return key, nil
+}
+
 func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Client, error) {
 	// Use the SSHKeyPath from ServerHandler to connect via SSH
 	sh.logger.Debug("Starting ssh port forwarding", slog.String("server", server.Name))

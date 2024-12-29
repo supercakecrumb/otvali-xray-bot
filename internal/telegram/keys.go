@@ -11,14 +11,6 @@ import (
 	tu "github.com/mymmrac/telego/telegoutil"
 )
 
-type serverOutput struct {
-	ID            int64
-	Country       string
-	City          string
-	OnlineClients int
-	AllClients    int
-}
-
 // Handle /get_key command
 func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 	chatID := update.Message.Chat.ID
@@ -66,7 +58,7 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 		// TODO: Count online users for this inbound
 
 		// Create button text and callback data
-		buttonText := fmt.Sprintf("%s %s, %s online:(%s/%s)", countryToFlag(server.Country), server.Country, server.City, "tbd", "tbd")
+		buttonText := fmt.Sprintf("%s %s, %s", countryToFlag(server.Country), server.Country, server.City)
 		callbackData := fmt.Sprintf("getkey_%d", server.ID)
 
 		// Create the button
@@ -79,24 +71,10 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 	return buttons, nil
 }
 
-func (b *Bot) getServerOutput(serverID int64) (*serverOutput, error) {
-	so := serverOutput{
-		ID:            serverID,
-		Country:       "",
-		City:          "",
-		OnlineClients: 0,
-		AllClients:    0,
-	}
-
-	return &so, nil
-}
-
 // Handle callback queries from /get_key command
 func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	callbackQuery := update.CallbackQuery
 	data := callbackQuery.Data
-	chatID := callbackQuery.Message.GetChat().ID
-	messageID := callbackQuery.Message.GetMessageID()
 
 	if !strings.HasPrefix(data, "getkey_") {
 		// Unknown callback data
@@ -104,73 +82,91 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	}
 
 	// Extract inbound ID from callback data
-	var inboundID int
-	_, err := fmt.Sscanf(data, "getkey_%d", &inboundID)
+	var serverID int
+	_, err := fmt.Sscanf(data, "getkey_%d", &serverID)
 	if err != nil {
 		b.logger.Error("Failed to parse inbound ID", "error", err)
 		return
 	}
 
 	// Start generating the key
-	go b.generateKeyProcess(bot, chatID, messageID, inboundID, callbackQuery)
+	go b.generateKeyProcess(serverID, callbackQuery)
 }
 
 // Generate key process with animated dots and message updates
-func (b *Bot) generateKeyProcess(bot *telego.Bot, chatID int64, messageID int, inboundID int, callbackQuery *telego.CallbackQuery) {
+func (b *Bot) generateKeyProcess(serverID int, callbackQuery *telego.CallbackQuery) {
+	chatID := callbackQuery.Message.GetChat().ID
+	messageID := callbackQuery.Message.GetMessageID()
+	username := callbackQuery.Message.GetChat().Username
+
 	// Acknowledge the callback query to remove the loading animation
-	err := bot.AnswerCallbackQuery(&telego.AnswerCallbackQueryParams{
+	err := b.bot.AnswerCallbackQuery(&telego.AnswerCallbackQueryParams{
 		CallbackQueryID: callbackQuery.ID,
 	})
 	if err != nil {
 		b.logger.Error("Failed to answer callback query", "error", err)
 	}
 
-	// Initialize the message
-	loadingText := "Генерирую ключ"
-	msgText := loadingText
-	editMsg := &telego.EditMessageTextParams{
-		ChatID:    tu.ID(chatID),
-		MessageID: messageID,
-		Text:      msgText,
-	}
-
-	_, err = bot.EditMessageText(editMsg)
+	keyMsg, cancel, err := b.sendMessageWithAnimatedDots(chatID, messageID, "Генерирую ключ")
 	if err != nil {
-		b.logger.Error("Failed to edit message", "error", err)
+		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
+		keyMsg.Text = errorMsg
+		_, _ = b.bot.EditMessageText(keyMsg)
 		return
 	}
 
-	// Start the loading animation
-	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go b.animateDots(bot, ctx, editMsg, loadingText)
 
+	server, err := b.db.GetServerByID(int64(serverID))
+	if err != nil {
+		b.logger.Error("error getting server from db", slog.String("error", err.Error()))
+	}
 	// Proceed to generate the key
-	key, err := b.generateVLESSKey(chatID, inboundID)
+	key, err := b.sh.GetClientKey(server, username)
 	if err != nil {
 		cancel() // Stop the animation
 		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
-		editMsg.Text = errorMsg
-		_, _ = bot.EditMessageText(editMsg)
+		keyMsg.Text = errorMsg
+		_, _ = b.bot.EditMessageText(keyMsg)
 		return
 	}
 
 	cancel() // Stop the animation
 
 	// Edit the message to show the generated key in monospace
-	keyMsg := fmt.Sprintf("`%s`", key)
-	editMsg.Text = keyMsg
-	editMsg.ParseMode = telego.ModeMarkdownV2
+	keyText := fmt.Sprintf("`%s`", key)
+	keyMsg.Text = keyText
+	keyMsg.ParseMode = telego.ModeMarkdownV2
 
-	_, err = bot.EditMessageText(editMsg)
+	_, err = b.bot.EditMessageText(keyMsg)
 	if err != nil {
 		b.logger.Error("Failed to edit message with key", "error", err)
 		return
 	}
 }
 
+func (b *Bot) sendMessageWithAnimatedDots(chatID int64, messageID int, loadingText string) (*telego.EditMessageTextParams, context.CancelFunc, error) {
+	editMsg := &telego.EditMessageTextParams{
+		ChatID:    tu.ID(chatID),
+		MessageID: messageID,
+		Text:      loadingText,
+	}
+
+	_, err := b.bot.EditMessageText(editMsg)
+	if err != nil {
+		b.logger.Error("Failed to edit message", "error", err)
+		return editMsg, nil, err
+	}
+
+	// Start the loading animation
+	ctx, cancel := context.WithCancel(context.Background())
+	go b.animateDots(ctx, editMsg, loadingText)
+
+	return editMsg, cancel, nil
+}
+
 // Animate dots in the loading message
-func (b *Bot) animateDots(bot *telego.Bot, ctx context.Context, editMsg *telego.EditMessageTextParams, baseText string) {
+func (b *Bot) animateDots(ctx context.Context, editMsg *telego.EditMessageTextParams, baseText string) {
 	dots := []string{".", "..", "...", ""}
 	i := 0
 	for {
@@ -179,7 +175,7 @@ func (b *Bot) animateDots(bot *telego.Bot, ctx context.Context, editMsg *telego.
 			return
 		default:
 			editMsg.Text = baseText + dots[i%len(dots)]
-			_, err := bot.EditMessageText(editMsg)
+			_, err := b.bot.EditMessageText(editMsg)
 			if err != nil {
 				b.logger.Error("Failed to edit message during dots animation", "error", err)
 				return
@@ -188,10 +184,4 @@ func (b *Bot) animateDots(bot *telego.Bot, ctx context.Context, editMsg *telego.
 			i++
 		}
 	}
-}
-
-// Generate VLESS key for the user
-func (b *Bot) generateVLESSKey(chatID int64, inboundID int) (string, error) {
-	time.Sleep(5 * time.Second)
-	return "", fmt.Errorf("Хехехехех, я ещё не реализовала этот функционал подовитесь капиталисты")
 }

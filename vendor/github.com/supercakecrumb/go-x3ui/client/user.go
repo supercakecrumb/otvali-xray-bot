@@ -64,7 +64,7 @@ func (c *Client) GenerateDefaultInboundClient(email string, tgID int64) InboundC
 		TotalGB:    0,
 		ExpiryTime: 0,
 		Enable:     true,
-		TgID:       tgID,
+		TgID:       FlexibleInt64{Value: &tgID},
 		SubID:      uuid.NewString(),
 		Reset:      0,
 	}
