@@ -5,6 +5,20 @@ import (
 	tu "github.com/mymmrac/telego/telegoutil"
 )
 
+const (
+	CallbackGetKey         = "getkey_"
+	CallbackHelpVPNSetup   = "help_vpn_setup"
+	CallbackHelpVPNLinux   = "help_vpn_linux"
+	CallbackHelpVPNWindows = "help_vpn_windows"
+	CallbackHelpVPNAndroid = "help_vpn_android"
+	CallbackHelpVPNIOS     = "help_vpn_ios"
+	CallbackHelpVPNMacOS   = "help_vpn_macos"
+	CallbackHelpHowItWorks = "help_how_it_works"
+	CallbackHelpBack       = "help_back"
+
+	howItWorksText = `Ну вот так вот работает чо нос суеш куда не поподя`
+)
+
 // Russian messages
 var (
 	helpMessage = "Доступные команды:\n" +
@@ -14,23 +28,40 @@ var (
 		"/get_key - получить ключ для доступа к VPN\n\n" +
 		"Выберите один из вариантов ниже:"
 
-	vpnSetupText    = "Инструкция по настройке VPN:\n\n1. Шаг первый...\n2. Шаг второй...\n3. Шаг третий..."
-	invitationsText = "Чтобы поделиться доступом к боту, используйте команду /invite <username>."
-	howItWorksText  = "Описание того, как это работает:\n\nНаш сервис позволяет вам получить доступ к VPN через бота..."
-
 	helpKeyboard = tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("Настройка VPN").WithCallbackData("help_vpn_setup"),
+			tu.InlineKeyboardButton("🔑 Получить ключ 🔑").WithCallbackData(CallbackGetKey),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("Приглашения").WithCallbackData("help_invitations"),
-			tu.InlineKeyboardButton("Как это работает").WithCallbackData("help_how_it_works"),
+			tu.InlineKeyboardButton("⚙️ Настройка VPN").WithCallbackData(CallbackHelpVPNSetup),
+			tu.InlineKeyboardButton("ℹ️ Как это работает").WithCallbackData(CallbackHelpHowItWorks),
+		),
+	)
+
+	vpnOSKeyboard = tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("🪟 Windows").WithCallbackData(CallbackHelpVPNWindows),
+			tu.InlineKeyboardButton("🍏 macOS").WithCallbackData(CallbackHelpVPNMacOS),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("📱 Android").WithCallbackData(CallbackHelpVPNAndroid),
+			tu.InlineKeyboardButton("🍎 iOS").WithCallbackData(CallbackHelpVPNIOS),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("🐧 Linux").WithCallbackData(CallbackHelpVPNLinux),
+			tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack),
 		),
 	)
 
 	helpBackKeyboard = tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("Назад").WithCallbackData("help_back"),
+			tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack),
+		),
+	)
+
+	helpVpnBackKeyboard = tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpVPNSetup),
 		),
 	)
 )
@@ -65,27 +96,40 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 
 	switch data {
 	case "help_vpn_setup":
-		text = vpnSetupText
-	case "help_invitations":
-		text = invitationsText
+		text = "Выберите вашу платформу для получения инструкции:"
+		keyboard = vpnOSKeyboard
+	case "help_vpn_linux":
+		text = InstructionHiddifyLinux
+		keyboard = helpVpnBackKeyboard
+	case "help_vpn_windows":
+		text = InstructionHiddifyWindows
+		keyboard = helpVpnBackKeyboard
+	case "help_vpn_android":
+		text = InstructionHiddifyAndroid
+		keyboard = helpVpnBackKeyboard
+	case "help_vpn_ios":
+		text = InstructionHiddifyIOS
+		keyboard = helpVpnBackKeyboard
+	case "help_vpn_macos":
+		text = InstructionHiddifyMacOS
+		keyboard = helpVpnBackKeyboard
 	case "help_how_it_works":
 		text = howItWorksText
+		keyboard = helpBackKeyboard
 	case "help_back":
 		text = helpMessage
 		keyboard = helpKeyboard
 	default:
-		// Unknown callback data
 		return
 	}
 
-	// Edit the original message
 	editMsg := &telego.EditMessageTextParams{
 		ChatID:      tu.ID(chatID),
 		MessageID:   messageID,
 		Text:        text,
+		ParseMode:   telego.ModeHTML,
 		ReplyMarkup: keyboard,
 	}
-
 	_, err := bot.EditMessageText(editMsg)
 	if err != nil {
 		b.logger.Error("Failed to edit message", "error", err)

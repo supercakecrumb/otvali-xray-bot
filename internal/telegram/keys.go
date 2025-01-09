@@ -11,6 +11,12 @@ import (
 	tu "github.com/mymmrac/telego/telegoutil"
 )
 
+var backHomeKeyboard = tu.InlineKeyboard(
+	tu.InlineKeyboardRow(
+		tu.InlineKeyboardButton("🏠 Домой").WithCallbackData("help_back"),
+	),
+)
+
 // Handle /get_key command
 func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 	chatID := update.Message.Chat.ID
@@ -68,6 +74,12 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 		buttons = append(buttons, tu.InlineKeyboardRow(button))
 	}
 
+	backRow := tu.InlineKeyboardRow(
+		tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack),
+	)
+
+	buttons = append(buttons, backRow)
+
 	return buttons, nil
 }
 
@@ -75,9 +87,38 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	callbackQuery := update.CallbackQuery
 	data := callbackQuery.Data
+	chatID := callbackQuery.Message.GetChat().ID
+	msgID := callbackQuery.Message.GetMessageID()
 
 	if !strings.HasPrefix(data, "getkey_") {
 		// Unknown callback data
+		return
+	}
+
+	// Check if callback data matches "getkey_" exactly
+	if data == "getkey_" {
+		serverButtons, err := b.getServerButtons(chatID)
+		if err != nil {
+			b.logger.Error("Failed to get server buttons", "error", err)
+			_, _ = bot.SendMessage(tu.Message(
+				tu.ID(chatID),
+				"Произошла ошибка при получении списка серверов. Пожалуйста, попробуйте позже.",
+			))
+			return
+		}
+
+		// Create inline keyboard with server buttons
+		keyboard := tu.InlineKeyboard(serverButtons...)
+
+		editMsg := &telego.EditMessageTextParams{
+			ChatID:      tu.ID(chatID),
+			MessageID:   msgID,
+			Text:        "Выберите сервер для получения ключа:",
+			ReplyMarkup: keyboard,
+		}
+
+		b.bot.EditMessageText(editMsg)
+
 		return
 	}
 
@@ -133,10 +174,12 @@ func (b *Bot) generateKeyProcess(serverID int, callbackQuery *telego.CallbackQue
 
 	cancel() // Stop the animation
 
+	serverName := fmt.Sprintf("%s %s, %s", countryToFlag(server.Country), server.Country, server.City)
 	// Edit the message to show the generated key in monospace
-	keyText := fmt.Sprintf("`%s`", key)
+	keyText := fmt.Sprintf("Твой ключ от сервера %v:```%s```Скопируй его и вставь в Hiddify чтобы начать пользоваться", serverName, key)
 	keyMsg.Text = keyText
 	keyMsg.ParseMode = telego.ModeMarkdownV2
+	keyMsg.ReplyMarkup = backHomeKeyboard
 
 	_, err = b.bot.EditMessageText(keyMsg)
 	if err != nil {
