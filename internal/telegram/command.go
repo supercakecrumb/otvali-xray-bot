@@ -55,7 +55,7 @@ func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 		return
 	}
 
-	invitedUsername := strings.ToLower(args[1])
+	invitedUsername := strings.TrimPrefix(strings.ToLower(args[1]), "@")
 
 	// Check if the user already exists
 	_, err := b.db.GetUserByUsername(invitedUsername)
