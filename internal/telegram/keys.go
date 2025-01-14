@@ -181,6 +181,8 @@ func (b *Bot) generateKeyProcess(serverID int, callbackQuery *telego.CallbackQue
 	keyMsg.ParseMode = telego.ModeMarkdownV2
 	keyMsg.ReplyMarkup = backHomeKeyboard
 
+	b.NotifyAdmins(fmt.Sprintf("Server %v key was given to @%v", serverName, keyMsg.ChatID.Username))
+
 	_, err = b.bot.EditMessageText(keyMsg)
 	if err != nil {
 		b.logger.Error("Failed to edit message with key", "error", err)
