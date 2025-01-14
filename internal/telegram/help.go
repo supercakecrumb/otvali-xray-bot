@@ -15,8 +15,6 @@ const (
 	CallbackHelpVPNMacOS   = "help_vpn_macos"
 	CallbackHelpHowItWorks = "help_how_it_works"
 	CallbackHelpBack       = "help_back"
-
-	howItWorksText = `Ну вот так вот работает чо нос суеш куда не поподя`
 )
 
 // Russian messages
