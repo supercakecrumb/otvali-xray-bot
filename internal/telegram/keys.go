@@ -131,18 +131,18 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	}
 
 	// Start generating the key
-	go b.generateKeyProcess(serverID, callbackQuery)
+	go b.generateKeyProcess(serverID, update)
 }
 
 // Generate key process with animated dots and message updates
-func (b *Bot) generateKeyProcess(serverID int, callbackQuery *telego.CallbackQuery) {
-	chatID := callbackQuery.Message.GetChat().ID
-	messageID := callbackQuery.Message.GetMessageID()
-	username := callbackQuery.Message.GetChat().Username
+func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
+	chatID := update.CallbackQuery.Message.GetChat().ID
+	messageID := update.CallbackQuery.Message.GetMessageID()
+	username := update.CallbackQuery.Message.GetChat().Username
 
 	// Acknowledge the callback query to remove the loading animation
 	err := b.bot.AnswerCallbackQuery(&telego.AnswerCallbackQueryParams{
-		CallbackQueryID: callbackQuery.ID,
+		CallbackQueryID: update.CallbackQuery.ID,
 	})
 	if err != nil {
 		b.logger.Error("Failed to answer callback query", "error", err)
@@ -181,7 +181,7 @@ func (b *Bot) generateKeyProcess(serverID int, callbackQuery *telego.CallbackQue
 	keyMsg.ParseMode = telego.ModeMarkdownV2
 	keyMsg.ReplyMarkup = backHomeKeyboard
 
-	b.NotifyAdmins(fmt.Sprintf("Server %v key was given to @%v", serverName, keyMsg.ChatID.Username))
+	b.NotifyAdmins(fmt.Sprintf("Server %v key was given to @%v", serverName, username))
 
 	_, err = b.bot.EditMessageText(keyMsg)
 	if err != nil {
