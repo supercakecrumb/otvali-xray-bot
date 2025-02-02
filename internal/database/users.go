@@ -13,6 +13,14 @@ func (db *DB) AddUser(user *User) error {
 	return db.Conn.Save(user).Error
 }
 
+func (db *DB) GetAllUsers() ([]User, error) {
+	var users []User
+	if err := db.Conn.Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 // GetUserByID retrieves a user by their primary key ID
 func (db *DB) GetUserByID(id int64) (*User, error) {
 	var user User

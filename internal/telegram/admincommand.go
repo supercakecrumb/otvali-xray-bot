@@ -17,6 +17,8 @@ func (b *Bot) registerAdminCommands() {
 	b.bh.Handle(b.handleAddServer, th.CommandEqual("add_server"))
 	b.bh.Handle(b.handleListServers, th.CommandEqual("list_servers"))
 	b.bh.Handle(b.handleServerExclusivity, th.CommandEqual("server_exclusivity"))
+	b.bh.Handle(b.handleSendToAll, th.CommandEqual("send_to_all"))
+	b.bh.Handle(b.handleUsers, th.CommandEqual("users"))
 }
 
 func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
@@ -235,5 +237,82 @@ func (b *Bot) handleServerExclusivity(bot *telego.Bot, update telego.Update) {
 	}
 
 	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("Эксклюзивность сервера '%s' установлена в '%t'.", server.Name, isExclusive))
+	_, _ = bot.SendMessage(msg)
+}
+
+func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
+	if update.Message == nil {
+		b.logger.Error("Ошибка обработки send_to_all", slog.String("error", "update.Message == nil"))
+		return
+	}
+
+	message := update.Message
+	chatID := message.Chat.ID
+	userID := message.From.ID
+
+	isAdmin, err := b.db.IsUserAdmin(userID)
+	if err != nil || !isAdmin {
+		msg := tu.Message(tu.ID(chatID), "У вас нет прав для выполнения этой команды.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	args := strings.Fields(message.Text)
+	if len(args) < 2 {
+		msg := tu.Message(tu.ID(chatID), "Использование: /send_to_all <текст>")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	text := strings.Join(args[1:], " ")
+
+	users, err := b.db.GetAllUsers()
+	if err != nil {
+		b.logger.Error("Не удалось получить пользователей", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Ошибка при получении списка пользователей.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	for _, user := range users {
+		msg := tu.Message(tu.ID(*user.TelegramID), text)
+		_, _ = bot.SendMessage(msg)
+	}
+
+	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("Сообщение отправлено %d пользователям.", len(users)))
+	_, _ = bot.SendMessage(msg)
+}
+
+func (b *Bot) handleUsers(bot *telego.Bot, update telego.Update) {
+	if update.Message == nil {
+		b.logger.Error("Ошибка обработки users", slog.String("error", "update.Message == nil"))
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	userID := update.Message.From.ID
+
+	isAdmin, err := b.db.IsUserAdmin(userID)
+	if err != nil || !isAdmin {
+		msg := tu.Message(tu.ID(chatID), "У вас нет прав для выполнения этой команды.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	users, err := b.db.GetAllUsers()
+	if err != nil {
+		b.logger.Error("Ошибка получения пользователей", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Ошибка при получении количества пользователей.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	msgText := []string{fmt.Sprintf("Количество пользователей: %d", len(users))}
+
+	for _, user := range users {
+		msgText = append(msgText, fmt.Sprintf("@%v invited by: @%v", user.Username, user.InvitedByUsername))
+	}
+
+	msg := tu.Message(tu.ID(chatID), strings.Join(msgText, "\n"))
 	_, _ = bot.SendMessage(msg)
 }
