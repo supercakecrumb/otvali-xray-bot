@@ -19,6 +19,7 @@ func (b *Bot) registerAdminCommands() {
 	b.bh.Handle(b.handleServerExclusivity, th.CommandEqual("server_exclusivity"))
 	b.bh.Handle(b.handleSendToAll, th.CommandEqual("send_to_all"))
 	b.bh.Handle(b.handleUsers, th.CommandEqual("users"))
+	b.bh.Handle(b.handleDeleteUser, th.CommandEqual("delete_user"))
 }
 
 func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
@@ -310,9 +311,61 @@ func (b *Bot) handleUsers(bot *telego.Bot, update telego.Update) {
 	msgText := []string{fmt.Sprintf("Количество пользователей: %d", len(users))}
 
 	for _, user := range users {
-		msgText = append(msgText, fmt.Sprintf("@%v invited by: @%v", user.Username, user.InvitedByUsername))
+		msgText = append(msgText, fmt.Sprintf("%v: @%v invited by: @%v", user.ID, user.Username, user.InvitedByUsername))
 	}
 
 	msg := tu.Message(tu.ID(chatID), strings.Join(msgText, "\n"))
+	_, _ = bot.SendMessage(msg)
+}
+
+func (b *Bot) handleDeleteUser(bot *telego.Bot, update telego.Update) {
+	if update.Message == nil {
+		b.logger.Error("Error handling delete_user command", slog.String("error", "update.Message == nil"))
+		return
+	}
+
+	message := update.Message
+	chatID := message.Chat.ID
+	userID := message.From.ID
+
+	// Check if the user is an admin
+	isAdmin, err := b.db.IsUserAdmin(userID)
+	if err != nil || !isAdmin {
+		msg := tu.Message(tu.ID(chatID), "You do not have permission to execute this command.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Parse user ID
+	args := strings.Fields(message.Text)
+	if len(args) < 2 {
+		msg := tu.Message(tu.ID(chatID), "Usage: /delete_user <user_id>")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	deleteUserID, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		msg := tu.Message(tu.ID(chatID), "Invalid user ID. It must be a number.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Delete user from database
+	err = b.db.DeleteUserByID(deleteUserID)
+	if err != nil {
+		msg := ""
+		if errors.Is(err, database.ErrUserNotFound) {
+			msg = fmt.Sprintf("User with ID %d not found.", deleteUserID)
+		} else {
+			b.logger.Error("Error deleting user", slog.String("error", err.Error()))
+			msg = fmt.Sprintf("Error while deleting user from the database: %v.", err.Error())
+		}
+		_, _ = bot.SendMessage(tu.Message(message.Chat.ChatID(), msg))
+		return
+	}
+
+	// Send success message
+	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("User with ID %d has been successfully deleted.", deleteUserID))
 	_, _ = bot.SendMessage(msg)
 }

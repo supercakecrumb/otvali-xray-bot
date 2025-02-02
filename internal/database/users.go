@@ -89,3 +89,15 @@ func (db *DB) IsUserAdmin(userTelegramID int64) (bool, error) {
 	}
 	return user.IsAdmin, nil
 }
+
+// DeleteUserByID removes a user from the database by their ID
+func (db *DB) DeleteUserByID(userID int64) error {
+	result := db.Conn.Delete(&User{}, "id = ?", userID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
