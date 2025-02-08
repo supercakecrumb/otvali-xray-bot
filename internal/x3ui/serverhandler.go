@@ -120,5 +120,7 @@ func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Cli
 	sh.localPorts[server.ID] = localPort
 	sh.mutex.Unlock()
 
+	go sh.monitorSSHConnections(server)
+
 	return x3Client, nil
 }

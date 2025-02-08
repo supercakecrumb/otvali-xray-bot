@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"log/slog"
 
@@ -269,4 +270,41 @@ func findLocalPort(start int) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("no available ports found starting from %d", start)
+}
+
+func (sh *ServerHandler) monitorSSHConnections(server *database.Server) {
+	for {
+		time.Sleep(10 * time.Second) // Check every 10 seconds
+
+		sh.mutex.Lock()
+		client, exists := sh.sshClients[server.ID]
+		sh.mutex.Unlock()
+
+		if !exists || !isSSHConnectionAlive(client) {
+			sh.logger.Warn("SSH connection lost, reconnecting", slog.String("server", server.Name))
+
+			sh.mutex.Lock()
+			delete(sh.sshClients, server.ID)
+			sh.mutex.Unlock()
+
+			newClient, _, err := sh.StartSSHPortForward(server)
+			if err != nil {
+				sh.logger.Error("Failed to reconnect SSH", slog.String("error", err.Error()))
+				continue
+			}
+
+			sh.mutex.Lock()
+			sh.sshClients[server.ID] = newClient
+			sh.mutex.Unlock()
+		}
+	}
+}
+
+func isSSHConnectionAlive(client *ssh.Client) bool {
+	session, err := client.NewSession()
+	if err != nil {
+		return false
+	}
+	defer session.Close()
+	return true
 }

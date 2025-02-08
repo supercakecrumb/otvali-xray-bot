@@ -278,6 +278,8 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 	for _, user := range users {
 		msg := tu.Message(tu.ID(*user.TelegramID), text)
 		_, _ = bot.SendMessage(msg)
+		msg = tu.Message(tu.ID(chatID), fmt.Sprintf("Сообщение отправлено %v", user.Username))
+		_, _ = bot.SendMessage(msg)
 	}
 
 	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("Сообщение отправлено %d пользователям.", len(users)))
