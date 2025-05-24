@@ -19,7 +19,7 @@ var (
 
 	InstructionHiddifyWindows = `<b>Установка Hiddify на Windows:</b>
 
-1. Скачайте установочный файл Hiddify для Windows с <a href="https://github.com/hiddify/hiddify-config">официальной страницы проекта</a> или используйте подготовленный релиз (если доступен).
+1. Скачайте установочный файл Hiddify для Windows с <a href="https://hiddify.com/">официальной страницы проекта</a> или используйте подготовленный релиз (если доступен).
 
 2. Установите программу, следуя инструкциям мастера установки.
 
@@ -31,7 +31,7 @@ var (
 
 1. Установите приложение Hiddify:
    - <a href="https://play.google.com/store/apps/details?id=app.hiddify.com&pcampaignid=web_share">Ссылка на Google Play</a> (если приложение доступно в Google Play)
-   - или загрузите APK-файл с <a href="https://github.com/hiddify/hiddify-config">официального репозитория GitHub</a> и установите вручную.
+   - или загрузите APK-файл с <a href="https://hiddify.com/">официальной страницы проекта</a> и установите вручную.
 
 2. Запустите приложение и выполните первичную настройку.
 
@@ -46,7 +46,7 @@ var (
 	  - Откройте приложение и выполните начальную настройку
 
 2. <b>Вариант 2: Hiddify (если доступно)</b>
-	  - Следуйте инструкциям с <a href="https://github.com/hiddify/hiddify-config">официального репозитория GitHub</a> для установки Hiddify альтернативными способами
+	  - Следуйте инструкциям с <a href="https://hiddify.com/">официального сайта проекта</a> для установки Hiddify альтернативными способами
 
 3. <b>Использование ключа:</b>
 	  - Получите ключ через команду /get_key или кнопку в меню бота
@@ -57,6 +57,8 @@ var (
 1. Установите <a href="https://brew.sh">Homebrew</a>, если у вас его ещё нет:
 <pre><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 </code></pre>
+
+1.1 Или установите его с официального сайта: https://hiddify.com/
 
 2. Установите Hiddify через Homebrew:
 <pre><code>brew install hiddify
