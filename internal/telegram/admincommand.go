@@ -275,15 +275,55 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 		return
 	}
 
-	for _, user := range users {
-		msg := tu.Message(tu.ID(*user.TelegramID), text)
-		_, _ = bot.SendMessage(msg)
-		msg = tu.Message(tu.ID(chatID), fmt.Sprintf("Сообщение отправлено %v", user.Username))
-		_, _ = bot.SendMessage(msg)
+	successCount := 0
+	failCount := 0
+
+	// Send initial status message
+	statusMsg := tu.Message(tu.ID(chatID), "Начинаю отправку сообщений...")
+	_, err = bot.SendMessage(statusMsg)
+	if err != nil {
+		b.logger.Error("Failed to send initial status message", slog.String("error", err.Error()))
 	}
 
-	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("Сообщение отправлено %d пользователям.", len(users)))
-	_, _ = bot.SendMessage(msg)
+	for _, user := range users {
+		// Ensure username has @ prefix
+		username := user.Username
+		if !strings.HasPrefix(username, "@") {
+			username = "@" + username
+		}
+
+		// Try to send message to user
+		msg := tu.Message(tu.ID(*user.TelegramID), text)
+		resp, err := bot.SendMessage(msg)
+
+		statusText := ""
+		if err != nil || resp == nil {
+			// Failed to send message
+			failCount++
+			errorMsg := "неизвестная ошибка"
+			if err != nil {
+				errorMsg = err.Error()
+			}
+			statusText = fmt.Sprintf("🔴 %s: Ошибка отправки (%s)", username, errorMsg)
+			b.logger.Error("Failed to send message to user",
+				slog.String("username", username),
+				slog.String("error", errorMsg))
+		} else {
+			// Successfully sent message
+			successCount++
+			statusText = fmt.Sprintf("🟢 %s: Сообщение успешно отправлено", username)
+		}
+
+		// Send status update to admin
+		statusUpdateMsg := tu.Message(tu.ID(chatID), statusText)
+		_, _ = bot.SendMessage(statusUpdateMsg)
+	}
+
+	// Send summary message
+	summaryText := fmt.Sprintf("Отправка завершена. Успешно: %d 🟢, Ошибок: %d 🔴, Всего: %d",
+		successCount, failCount, len(users))
+	summaryMsg := tu.Message(tu.ID(chatID), summaryText)
+	_, _ = bot.SendMessage(summaryMsg)
 }
 
 func (b *Bot) handleUsers(bot *telego.Bot, update telego.Update) {
