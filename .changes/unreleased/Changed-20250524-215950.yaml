@@ -1,0 +1,4 @@
+kind: Changed
+body: Improved handleSendToAll function in admincommand.go to provide better feedback
+  with color indicators (green/red) for message delivery status
+time: 2025-05-24T21:59:50.312986+03:00
