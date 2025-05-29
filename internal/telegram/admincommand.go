@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
@@ -277,6 +278,7 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 
 	successCount := 0
 	failCount := 0
+	statusUpdates := []string{}
 
 	// Send initial status message
 	statusMsg := tu.Message(tu.ID(chatID), "Начинаю отправку сообщений...")
@@ -285,7 +287,11 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 		b.logger.Error("Failed to send initial status message", slog.String("error", err.Error()))
 	}
 
-	for _, user := range users {
+	// Send batch status updates to avoid rate limiting
+	batchSize := 10
+	currentBatch := 0
+
+	for i, user := range users {
 		// Ensure username has @ prefix
 		username := user.Username
 		if !strings.HasPrefix(username, "@") {
@@ -314,9 +320,28 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 			statusText = fmt.Sprintf("🟢 %s: Сообщение успешно отправлено", username)
 		}
 
-		// Send status update to admin
-		statusUpdateMsg := tu.Message(tu.ID(chatID), statusText)
-		_, _ = bot.SendMessage(statusUpdateMsg)
+		// Add status to the batch
+		statusUpdates = append(statusUpdates, statusText)
+		currentBatch++
+
+		// Send batch update when we reach batch size or at the end
+		if currentBatch >= batchSize || i == len(users)-1 {
+			if len(statusUpdates) > 0 {
+				batchText := strings.Join(statusUpdates, "\n")
+				batchMsg := tu.Message(tu.ID(chatID), batchText)
+				_, err = bot.SendMessage(batchMsg)
+				if err != nil {
+					b.logger.Error("Failed to send batch status update", slog.String("error", err.Error()))
+				}
+
+				// Reset for next batch
+				statusUpdates = []string{}
+				currentBatch = 0
+
+				// Add a small delay to avoid rate limiting
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
 	}
 
 	// Send summary message
