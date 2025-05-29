@@ -276,42 +276,69 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 		return
 	}
 
+	if len(users) == 0 {
+		msg := tu.Message(tu.ID(chatID), "Нет пользователей для отправки сообщений.")
+		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// Function to send message with retry
+	sendWithRetry := func(chatID int64, text string, maxRetries int) (*telego.Message, error) {
+		var lastErr error
+		for i := 0; i < maxRetries; i++ {
+			msg := tu.Message(tu.ID(chatID), text)
+			resp, err := bot.SendMessage(msg)
+			if err == nil {
+				return resp, nil
+			}
+			lastErr = err
+			b.logger.Warn("Retry sending message",
+				slog.Int("attempt", i+1),
+				slog.String("error", err.Error()))
+			time.Sleep(2 * time.Second) // Wait before retry
+		}
+		return nil, lastErr
+	}
+
+	// Send initial status message with retry
+	_, err = sendWithRetry(chatID, "Начинаю отправку сообщений...", 3)
+	if err != nil {
+		b.logger.Error("Failed to send initial status message after retries",
+			slog.String("error", err.Error()))
+		// Continue anyway
+	}
+
 	successCount := 0
 	failCount := 0
 	statusUpdates := []string{}
 
-	// Send initial status message
-	statusMsg := tu.Message(tu.ID(chatID), "Начинаю отправку сообщений...")
-	_, err = bot.SendMessage(statusMsg)
-	if err != nil {
-		b.logger.Error("Failed to send initial status message", slog.String("error", err.Error()))
-	}
-
-	// Send batch status updates to avoid rate limiting
-	batchSize := 10
+	// Process users in smaller batches with longer delays
+	batchSize := 5 // Reduced batch size
 	currentBatch := 0
 
 	for i, user := range users {
+		// Skip users without TelegramID
+		if user.TelegramID == nil {
+			b.logger.Warn("Skipping user without TelegramID", slog.String("username", user.Username))
+			continue
+		}
+
 		// Ensure username has @ prefix
 		username := user.Username
 		if !strings.HasPrefix(username, "@") {
 			username = "@" + username
 		}
 
-		// Try to send message to user
-		msg := tu.Message(tu.ID(*user.TelegramID), text)
-		resp, err := bot.SendMessage(msg)
+		// Try to send message to user with retry
+		_, err := sendWithRetry(*user.TelegramID, text, 2)
 
 		statusText := ""
-		if err != nil || resp == nil {
+		if err != nil {
 			// Failed to send message
 			failCount++
-			errorMsg := "неизвестная ошибка"
-			if err != nil {
-				errorMsg = err.Error()
-			}
+			errorMsg := err.Error()
 			statusText = fmt.Sprintf("🔴 %s: Ошибка отправки (%s)", username, errorMsg)
-			b.logger.Error("Failed to send message to user",
+			b.logger.Error("Failed to send message to user after retries",
 				slog.String("username", username),
 				slog.String("error", errorMsg))
 		} else {
@@ -328,27 +355,30 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 		if currentBatch >= batchSize || i == len(users)-1 {
 			if len(statusUpdates) > 0 {
 				batchText := strings.Join(statusUpdates, "\n")
-				batchMsg := tu.Message(tu.ID(chatID), batchText)
-				_, err = bot.SendMessage(batchMsg)
+				_, err = sendWithRetry(chatID, batchText, 3)
 				if err != nil {
-					b.logger.Error("Failed to send batch status update", slog.String("error", err.Error()))
+					b.logger.Error("Failed to send batch status update after retries",
+						slog.String("error", err.Error()))
 				}
 
 				// Reset for next batch
 				statusUpdates = []string{}
 				currentBatch = 0
 
-				// Add a small delay to avoid rate limiting
-				time.Sleep(500 * time.Millisecond)
+				// Add a longer delay to avoid rate limiting
+				time.Sleep(3 * time.Second)
 			}
 		}
 	}
 
-	// Send summary message
+	// Send summary message with retry
 	summaryText := fmt.Sprintf("Отправка завершена. Успешно: %d 🟢, Ошибок: %d 🔴, Всего: %d",
 		successCount, failCount, len(users))
-	summaryMsg := tu.Message(tu.ID(chatID), summaryText)
-	_, _ = bot.SendMessage(summaryMsg)
+	_, err = sendWithRetry(chatID, summaryText, 3)
+	if err != nil {
+		b.logger.Error("Failed to send summary message after retries",
+			slog.String("error", err.Error()))
+	}
 }
 
 func (b *Bot) handleUsers(bot *telego.Bot, update telego.Update) {
