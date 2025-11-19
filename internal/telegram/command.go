@@ -26,6 +26,10 @@ func (b *Bot) registerCommands() {
 // Handle /start command
 func (b *Bot) handleStart(bot *telego.Bot, update telego.Update) {
 	chatID := update.Message.Chat.ID
+	username := update.Message.From.Username
+
+	// Notify admins about command usage
+	b.NotifyAdminsOfCommand(username, chatID, "/start", "")
 
 	welcomeMessage := "Добро пожаловать! Используйте /help, чтобы узнать доступные команды."
 
@@ -37,6 +41,7 @@ func (b *Bot) handleStart(bot *telego.Bot, update telego.Update) {
 	_, err := bot.SendMessage(msg)
 	if err != nil {
 		b.logger.Error("Failed to send start message", "error", err)
+		b.NotifyAdminsOfError(username, chatID, "/start", err.Error(), "Не удалось отправить приветственное сообщение")
 	}
 }
 
@@ -44,7 +49,15 @@ func (b *Bot) handleStart(bot *telego.Bot, update telego.Update) {
 func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 	chatID := update.Message.Chat.ID
 	message := update.Message
+	username := message.From.Username
 	args := strings.Fields(message.Text)
+
+	// Notify admins about command usage
+	argsStr := ""
+	if len(args) > 1 {
+		argsStr = strings.Join(args[1:], " ")
+	}
+	b.NotifyAdminsOfCommand(username, chatID, "/invite", argsStr)
 
 	if len(args) < 2 {
 		msg := tu.Message(
@@ -52,6 +65,7 @@ func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 			"Использование: /invite <username>",
 		)
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/invite", "Неверные аргументы", "Пользователь не указал username для приглашения")
 		return
 	}
 
@@ -65,6 +79,7 @@ func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 			"Этот пользователь уже зарегистрирован.",
 		)
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfAction(username, chatID, "/invite", "Попытка пригласить уже существующего пользователя: @"+invitedUsername)
 		return
 	}
 
@@ -83,8 +98,12 @@ func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 			"Не удалось пригласить пользователя.",
 		)
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/invite", err.Error(), "Не удалось добавить пользователя @"+invitedUsername+" в базу данных")
 		return
 	}
+
+	// Notify admins about successful invitation
+	b.NotifyAdminsOfAction(username, chatID, "/invite", "Успешно пригласил пользователя: @"+invitedUsername)
 
 	msg := tu.Message(
 		tu.ID(chatID),
@@ -93,5 +112,6 @@ func (b *Bot) handleInvite(bot *telego.Bot, update telego.Update) {
 	_, err = bot.SendMessage(msg)
 	if err != nil {
 		b.logger.Error("Failed to send invite message", "error", err)
+		b.NotifyAdminsOfError(username, chatID, "/invite", err.Error(), "Не удалось отправить подтверждающее сообщение")
 	}
 }

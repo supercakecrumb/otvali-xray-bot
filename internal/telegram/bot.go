@@ -1,7 +1,9 @@
 package telegram
 
 import (
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
@@ -96,6 +98,172 @@ func (b *Bot) NotifyAdmins(message string) {
 			b.logger.Error("Failed to notify admin", slog.String("username", admin.Username), slog.String("error", err.Error()))
 		} else {
 			b.logger.Info("Notified admin", slog.String("username", admin.Username))
+		}
+	}
+}
+
+// NotifyAdminsOfAction sends a structured notification about a user action
+func (b *Bot) NotifyAdminsOfAction(username string, chatID int64, action string, details string) {
+	timestamp := time.Now().In(time.FixedZone("MSK", 3*60*60)).Format("2006-01-02 15:04:05 MSK")
+
+	message := fmt.Sprintf(
+		"✅ *Действие пользователя*\n\n"+
+			"👤 Пользователь: @%s\n"+
+			"🆔 Chat ID: `%d`\n"+
+			"⚡ Действие: %s\n"+
+			"📝 Детали: %s\n"+
+			"🕐 Время: %s",
+		username,
+		chatID,
+		action,
+		details,
+		timestamp,
+	)
+
+	b.logger.Info("User action",
+		slog.String("username", username),
+		slog.Int64("chat_id", chatID),
+		slog.String("action", action),
+		slog.String("details", details),
+	)
+
+	b.sendFormattedNotification(message)
+}
+
+// NotifyAdminsOfError sends a structured notification about an error
+func (b *Bot) NotifyAdminsOfError(username string, chatID int64, action string, errorMsg string, context string) {
+	timestamp := time.Now().In(time.FixedZone("MSK", 3*60*60)).Format("2006-01-02 15:04:05 MSK")
+
+	message := fmt.Sprintf(
+		"❌ *Ошибка пользователя*\n\n"+
+			"👤 Пользователь: @%s\n"+
+			"🆔 Chat ID: `%d`\n"+
+			"⚡ Действие: %s\n"+
+			"📝 Контекст: %s\n"+
+			"🚨 Ошибка: `%s`\n"+
+			"🕐 Время: %s",
+		username,
+		chatID,
+		action,
+		context,
+		errorMsg,
+		timestamp,
+	)
+
+	b.logger.Error("User error",
+		slog.String("username", username),
+		slog.Int64("chat_id", chatID),
+		slog.String("action", action),
+		slog.String("context", context),
+		slog.String("error", errorMsg),
+	)
+
+	b.sendFormattedNotification(message)
+}
+
+// NotifyAdminsOfCommand sends a notification about a command execution
+func (b *Bot) NotifyAdminsOfCommand(username string, chatID int64, command string, args string) {
+	timestamp := time.Now().In(time.FixedZone("MSK", 3*60*60)).Format("2006-01-02 15:04:05 MSK")
+
+	argsText := "нет"
+	if args != "" {
+		argsText = args
+	}
+
+	message := fmt.Sprintf(
+		"⚡ *Команда выполнена*\n\n"+
+			"👤 Пользователь: @%s\n"+
+			"🆔 Chat ID: `%d`\n"+
+			"💬 Команда: `%s`\n"+
+			"📋 Аргументы: %s\n"+
+			"🕐 Время: %s",
+		username,
+		chatID,
+		command,
+		argsText,
+		timestamp,
+	)
+
+	b.logger.Info("Command executed",
+		slog.String("username", username),
+		slog.Int64("chat_id", chatID),
+		slog.String("command", command),
+		slog.String("args", args),
+	)
+
+	b.sendFormattedNotification(message)
+}
+
+// NotifyAdminsOfKeyRequest sends a notification about a key request
+func (b *Bot) NotifyAdminsOfKeyRequest(username string, chatID int64, serverName string, success bool, errorMsg string) {
+	timestamp := time.Now().In(time.FixedZone("MSK", 3*60*60)).Format("2006-01-02 15:04:05 MSK")
+
+	var message string
+	if success {
+		message = fmt.Sprintf(
+			"🔑 *Ключ выдан*\n\n"+
+				"👤 Пользователь: @%s\n"+
+				"🆔 Chat ID: `%d`\n"+
+				"🖥 Сервер: %s\n"+
+				"✅ Статус: Успешно\n"+
+				"🕐 Время: %s",
+			username,
+			chatID,
+			serverName,
+			timestamp,
+		)
+
+		b.logger.Info("Key generated successfully",
+			slog.String("username", username),
+			slog.Int64("chat_id", chatID),
+			slog.String("server", serverName),
+		)
+	} else {
+		message = fmt.Sprintf(
+			"🔑 *Ошибка выдачи ключа*\n\n"+
+				"👤 Пользователь: @%s\n"+
+				"🆔 Chat ID: `%d`\n"+
+				"🖥 Сервер: %s\n"+
+				"❌ Статус: Ошибка\n"+
+				"🚨 Ошибка: `%s`\n"+
+				"🕐 Время: %s",
+			username,
+			chatID,
+			serverName,
+			errorMsg,
+			timestamp,
+		)
+
+		b.logger.Error("Key generation failed",
+			slog.String("username", username),
+			slog.Int64("chat_id", chatID),
+			slog.String("server", serverName),
+			slog.String("error", errorMsg),
+		)
+	}
+
+	b.sendFormattedNotification(message)
+}
+
+// sendFormattedNotification sends a formatted notification to all admins with Markdown parsing
+func (b *Bot) sendFormattedNotification(message string) {
+	admins, err := b.db.GetAdminUsers()
+	if err != nil {
+		b.logger.Error("Failed to fetch admin users", slog.String("error", err.Error()))
+		return
+	}
+
+	for _, admin := range admins {
+		msg := tu.Message(
+			tu.ID(*admin.TelegramID),
+			message,
+		).WithParseMode(telego.ModeMarkdown)
+
+		_, err := b.bot.SendMessage(msg)
+		if err != nil {
+			b.logger.Error("Failed to notify admin",
+				slog.String("username", admin.Username),
+				slog.String("error", err.Error()))
 		}
 	}
 }

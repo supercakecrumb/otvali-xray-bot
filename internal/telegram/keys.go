@@ -20,6 +20,10 @@ var backHomeKeyboard = tu.InlineKeyboard(
 // Handle /get_key command
 func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 	chatID := update.Message.Chat.ID
+	username := update.Message.From.Username
+
+	// Notify admins about command usage
+	b.NotifyAdminsOfCommand(username, chatID, "/get_key", "")
 
 	// Fetch the list of servers and their user counts
 	serverButtons, err := b.getServerButtons(chatID)
@@ -29,6 +33,7 @@ func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 			tu.ID(chatID),
 			"Произошла ошибка при получении списка серверов. Пожалуйста, попробуйте позже.",
 		))
+		b.NotifyAdminsOfError(username, chatID, "/get_key", err.Error(), "Не удалось получить список серверов")
 		return
 	}
 
@@ -43,6 +48,7 @@ func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 	_, err = bot.SendMessage(msg)
 	if err != nil {
 		b.logger.Error("Failed to send get_key message", "error", err)
+		b.NotifyAdminsOfError(username, chatID, "/get_key", err.Error(), "Не удалось отправить список серверов")
 	}
 }
 
@@ -56,7 +62,7 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 		b.logger.Error("Failed to fetch servers", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Не удалось получить список серверов.")
 		_, _ = b.bot.SendMessage(msg)
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch servers: %w", err)
 	}
 	for _, server := range servers {
 		// TODO: Parse the inbound settings to get total users
@@ -89,6 +95,7 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	data := callbackQuery.Data
 	chatID := callbackQuery.Message.GetChat().ID
 	msgID := callbackQuery.Message.GetMessageID()
+	username := callbackQuery.Message.GetChat().Username
 
 	if !strings.HasPrefix(data, "getkey_") {
 		// Unknown callback data
@@ -104,6 +111,7 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 				tu.ID(chatID),
 				"Произошла ошибка при получении списка серверов. Пожалуйста, попробуйте позже.",
 			))
+			b.NotifyAdminsOfError(username, chatID, "get_key_callback", err.Error(), "Не удалось получить список серверов для повторного выбора")
 			return
 		}
 
@@ -127,8 +135,12 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	_, err := fmt.Sscanf(data, "getkey_%d", &serverID)
 	if err != nil {
 		b.logger.Error("Failed to parse inbound ID", "error", err)
+		b.NotifyAdminsOfError(username, chatID, "get_key_callback", err.Error(), fmt.Sprintf("Не удалось распарсить server ID из callback data: %s", data))
 		return
 	}
+
+	// Notify admins about server selection
+	b.NotifyAdminsOfAction(username, chatID, "server_selected", fmt.Sprintf("Пользователь выбрал сервер ID: %d для получения ключа", serverID))
 
 	// Start generating the key
 	go b.generateKeyProcess(serverID, update)
@@ -146,6 +158,7 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	})
 	if err != nil {
 		b.logger.Error("Failed to answer callback query", "error", err)
+		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), "Не удалось ответить на callback query")
 	}
 
 	keyMsg, cancel, err := b.sendMessageWithAnimatedDots(chatID, messageID, "Генерирую ключ")
@@ -153,6 +166,7 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
 		keyMsg.Text = errorMsg
 		_, _ = b.bot.EditMessageText(keyMsg)
+		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), fmt.Sprintf("Не удалось начать анимацию генерации ключа для сервера ID: %d", serverID))
 		return
 	}
 
@@ -161,7 +175,16 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	server, err := b.db.GetServerByID(int64(serverID))
 	if err != nil {
 		b.logger.Error("error getting server from db", slog.String("error", err.Error()))
+		cancel() // Stop the animation
+		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
+		keyMsg.Text = errorMsg
+		_, _ = b.bot.EditMessageText(keyMsg)
+		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), fmt.Sprintf("Не удалось получить сервер из БД, ID: %d", serverID))
+		return
 	}
+
+	serverName := fmt.Sprintf("%s %s, %s", countryToFlag(server.Country), server.Country, server.City)
+
 	// Proceed to generate the key
 	key, err := b.sh.GetUserKey(server, username, chatID)
 	if err != nil {
@@ -169,23 +192,25 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
 		keyMsg.Text = errorMsg
 		_, _ = b.bot.EditMessageText(keyMsg)
+		b.NotifyAdminsOfKeyRequest(username, chatID, serverName, false, err.Error())
 		return
 	}
 
 	cancel() // Stop the animation
 
-	serverName := fmt.Sprintf("%s %s, %s", countryToFlag(server.Country), server.Country, server.City)
 	// Edit the message to show the generated key in monospace
 	keyText := fmt.Sprintf("Твой ключ от сервера %v:```%s```Скопируй его и вставь в Hiddify чтобы начать пользоваться", serverName, key)
 	keyMsg.Text = keyText
 	keyMsg.ParseMode = telego.ModeMarkdownV2
 	keyMsg.ReplyMarkup = backHomeKeyboard
 
-	b.NotifyAdmins(fmt.Sprintf("Server %v key was given to @%v", serverName, username))
+	// Notify admins about successful key generation
+	b.NotifyAdminsOfKeyRequest(username, chatID, serverName, true, "")
 
 	_, err = b.bot.EditMessageText(keyMsg)
 	if err != nil {
 		b.logger.Error("Failed to edit message with key", "error", err)
+		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), "Не удалось отправить ключ пользователю (ключ сгенерирован успешно)")
 		return
 	}
 }

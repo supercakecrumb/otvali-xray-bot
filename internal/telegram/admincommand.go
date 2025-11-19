@@ -30,12 +30,18 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 	message := update.Message
 	chatID := message.Chat.ID
 	userID := message.From.ID
+	username := message.From.Username
+
+	// Notify admins about command usage
+	argsStr := strings.Join(strings.Fields(message.Text)[1:], " ")
+	b.NotifyAdminsOfCommand(username, chatID, "/add_server", argsStr)
 
 	// Check if user is admin
 	isAdmin, err := b.db.IsUserAdmin(userID)
 	if err != nil || !isAdmin {
 		msg := tu.Message(tu.ID(chatID), "У вас нет прав для выполнения этой команды.")
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/add_server", "Нет прав администратора", "Попытка выполнить команду без прав")
 		return
 	}
 
@@ -43,6 +49,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 	if len(args) < 10 {
 		msg := tu.Message(tu.ID(chatID), "Использование: /add_server <Name> <Country> <City> <IP> <SSHPort> <SSHUser> <APIPort> <Username> <Password> [InboundID] [IsExclusive]")
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/add_server", "Недостаточно аргументов", fmt.Sprintf("Передано аргументов: %d, требуется минимум: 10", len(args)))
 		return
 	}
 
@@ -62,7 +69,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		b.logger.Error("Invalid APIPort", slog.String("error", err.Error()))
 		return
 	}
-	username := args[8]
+	x3uiUsername := args[8]
 	password := args[9]
 	var inboundID *int
 	if len(args) >= 11 {
@@ -88,7 +95,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		SSHPort:     sshPort,
 		SSHUser:     sshUser,
 		APIPort:     apiPort,
-		Username:    username,
+		Username:    x3uiUsername,
 		Password:    password,
 		InboundID:   inboundID,
 		IsExclusive: isExclusive,
@@ -100,6 +107,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		b.logger.Error("Failed to connect to server", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Не удалось подключиться к серверу.")
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/add_server", err.Error(), fmt.Sprintf("Не удалось подключиться к серверу: %s (%s)", name, ip))
 		return
 	}
 
@@ -110,6 +118,7 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 			b.logger.Error("Failed to create inbound", slog.String("error", err.Error()))
 			msg := tu.Message(tu.ID(chatID), "Не удалось создать исходящий прокси.")
 			_, _ = bot.SendMessage(msg)
+			b.NotifyAdminsOfError(username, chatID, "/add_server", err.Error(), fmt.Sprintf("Не удалось создать inbound для сервера: %s", name))
 			return
 		}
 		// Update server with new InboundID
@@ -121,8 +130,13 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		b.logger.Error("Failed to add server", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Не удалось добавить сервер в базу данных.")
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/add_server", err.Error(), fmt.Sprintf("Не удалось добавить сервер %s в БД", name))
 		return
 	}
+
+	// Notify admins about successful server addition
+	serverInfo := fmt.Sprintf("%s (%s, %s) - IP: %s, Exclusive: %t", name, country, city, ip, isExclusive)
+	b.NotifyAdminsOfAction(username, chatID, "/add_server", "Успешно добавлен сервер: "+serverInfo)
 
 	msg := tu.Message(tu.ID(chatID), "Сервер успешно добавлен и настроен.")
 	_, _ = bot.SendMessage(msg)
@@ -136,6 +150,10 @@ func (b *Bot) handleListServers(bot *telego.Bot, update telego.Update) {
 
 	chatID := update.Message.Chat.ID
 	userID := update.Message.From.ID
+	username := update.Message.From.Username
+
+	// Notify admins about command usage
+	b.NotifyAdminsOfCommand(username, chatID, "/list_servers", "")
 
 	// Check if user is an admin
 	isAdmin, err := b.db.IsUserAdmin(userID)
@@ -151,6 +169,7 @@ func (b *Bot) handleListServers(bot *telego.Bot, update telego.Update) {
 		b.logger.Error("Failed to fetch servers", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Не удалось получить список серверов.")
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/list_servers", err.Error(), "Не удалось получить список серверов из БД")
 		return
 	}
 
@@ -183,6 +202,11 @@ func (b *Bot) handleServerExclusivity(bot *telego.Bot, update telego.Update) {
 	message := update.Message
 	chatID := message.Chat.ID
 	userID := message.From.ID
+	username := message.From.Username
+
+	// Notify admins about command usage
+	argsStr := strings.Join(strings.Fields(message.Text)[1:], " ")
+	b.NotifyAdminsOfCommand(username, chatID, "/server_exclusivity", argsStr)
 
 	// Check if user is admin
 	isAdmin, err := b.db.IsUserAdmin(userID)
@@ -235,8 +259,12 @@ func (b *Bot) handleServerExclusivity(bot *telego.Bot, update telego.Update) {
 		b.logger.Error("Failed to update server exclusivity", slog.String("error", err.Error()))
 		msg := tu.Message(tu.ID(chatID), "Ошибка при обновлении эксклюзивности сервера.")
 		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/server_exclusivity", err.Error(), fmt.Sprintf("Не удалось обновить эксклюзивность сервера ID: %d", serverID))
 		return
 	}
+
+	// Notify admins about the change
+	b.NotifyAdminsOfAction(username, chatID, "/server_exclusivity", fmt.Sprintf("Изменена эксклюзивность сервера '%s' (ID: %d) на: %t", server.Name, serverID, isExclusive))
 
 	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("Эксклюзивность сервера '%s' установлена в '%t'.", server.Name, isExclusive))
 	_, _ = bot.SendMessage(msg)
@@ -251,6 +279,7 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 	message := update.Message
 	chatID := message.Chat.ID
 	userID := message.From.ID
+	username := message.From.Username
 
 	isAdmin, err := b.db.IsUserAdmin(userID)
 	if err != nil || !isAdmin {
@@ -267,6 +296,9 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 	}
 
 	text := strings.Join(args[1:], " ")
+
+	// Notify admins about broadcast
+	b.NotifyAdminsOfCommand(username, chatID, "/send_to_all", fmt.Sprintf("Текст: '%s'", text))
 
 	users, err := b.db.GetAllUsers()
 	if err != nil {
@@ -379,6 +411,9 @@ func (b *Bot) handleSendToAll(bot *telego.Bot, update telego.Update) {
 		b.logger.Error("Failed to send summary message after retries",
 			slog.String("error", err.Error()))
 	}
+
+	// Notify admins about broadcast completion
+	b.NotifyAdminsOfAction(username, chatID, "/send_to_all", fmt.Sprintf("Рассылка завершена. Успешно: %d, Ошибок: %d, Всего: %d", successCount, failCount, len(users)))
 }
 
 func (b *Bot) handleUsers(bot *telego.Bot, update telego.Update) {
@@ -389,6 +424,10 @@ func (b *Bot) handleUsers(bot *telego.Bot, update telego.Update) {
 
 	chatID := update.Message.Chat.ID
 	userID := update.Message.From.ID
+	username := update.Message.From.Username
+
+	// Notify admins about command usage
+	b.NotifyAdminsOfCommand(username, chatID, "/users", "")
 
 	isAdmin, err := b.db.IsUserAdmin(userID)
 	if err != nil || !isAdmin {
@@ -424,6 +463,11 @@ func (b *Bot) handleDeleteUser(bot *telego.Bot, update telego.Update) {
 	message := update.Message
 	chatID := message.Chat.ID
 	userID := message.From.ID
+	username := message.From.Username
+
+	// Notify admins about command usage
+	argsStr := strings.Join(strings.Fields(message.Text)[1:], " ")
+	b.NotifyAdminsOfCommand(username, chatID, "/delete_user", argsStr)
 
 	// Check if the user is an admin
 	isAdmin, err := b.db.IsUserAdmin(userID)
@@ -454,13 +498,18 @@ func (b *Bot) handleDeleteUser(bot *telego.Bot, update telego.Update) {
 		msg := ""
 		if errors.Is(err, database.ErrUserNotFound) {
 			msg = fmt.Sprintf("User with ID %d not found.", deleteUserID)
+			b.NotifyAdminsOfError(username, chatID, "/delete_user", err.Error(), fmt.Sprintf("Пользователь с ID %d не найден", deleteUserID))
 		} else {
 			b.logger.Error("Error deleting user", slog.String("error", err.Error()))
 			msg = fmt.Sprintf("Error while deleting user from the database: %v.", err.Error())
+			b.NotifyAdminsOfError(username, chatID, "/delete_user", err.Error(), fmt.Sprintf("Не удалось удалить пользователя с ID %d", deleteUserID))
 		}
 		_, _ = bot.SendMessage(tu.Message(message.Chat.ChatID(), msg))
 		return
 	}
+
+	// Notify admins about user deletion
+	b.NotifyAdminsOfAction(username, chatID, "/delete_user", fmt.Sprintf("Удалён пользователь с ID: %d", deleteUserID))
 
 	// Send success message
 	msg := tu.Message(tu.ID(chatID), fmt.Sprintf("User with ID %d has been successfully deleted.", deleteUserID))
