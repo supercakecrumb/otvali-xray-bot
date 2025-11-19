@@ -1,0 +1,319 @@
+# otvali-xray-bot - Telegram VPN Management Bot
+
+## Project Overview
+You are working on otvali-xray-bot, a Go-based Telegram bot that manages VPN (Xray/X3UI) access keys for users. The bot connects to X3UI panel servers via SSH tunnels and provides a user-friendly interface for VPN key distribution and server management.
+
+### Core Technologies
+- Go 1.23.3
+- PostgreSQL 15 with GORM ORM
+- Telego (Telegram Bot framework)
+- Docker & Docker Compose
+- SSH tunneling for secure X3UI API access
+
+## Architecture Principles
+
+### 1. Layered Architecture
+Follow the existing three-layer structure:
+- **Telegram Layer** (internal/telegram/): Command handlers, inline keyboards, message formatting
+- **Business Logic Layer** (internal/x3ui/): VPN key generation, SSH tunnel management, server health monitoring
+- **Data Access Layer** (internal/database/): User management, server configuration storage, GORM models
+
+### 2. Package Organization
+- `internal/`: Private application code (not importable by external projects)
+- `pkg/`: Reusable public packages (config, logger)
+- `cmd/`: Application entry points
+
+### 3. Dependency Direction
+Dependencies should flow downward:
+```
+telegram/ → x3ui/ → database/
+    ↓         ↓         ↓
+        pkg/ (config, logger)
+```
+
+## Code Style & Conventions
+
+### Go-Specific Guidelines
+
+1. **Error Handling**
+   ```go
+   // Always check errors immediately
+   if err != nil {
+       logger.Error("Operation failed", slog.String("error", err.Error()))
+       // Return user-friendly message
+       bot.SendMessage(tu.Message(chatID, "Произошла ошибка. Попробуйте позже."))
+       return
+   }
+   ```
+
+2. **Logging**
+   - Use structured logging with `slog`
+   - Include relevant context in log messages
+   ```go
+   logger.Info("Bot is starting...")
+   logger.Error("Failed to connect", slog.String("server", name), slog.String("error", err.Error()))
+   logger.Debug("Initializing x3ui client", slog.String("server", name))
+   ```
+
+3. **Function Naming**
+   - Public functions: PascalCase (exported)
+   - Private functions: camelCase (unexported)
+   - Methods: Receiver type + verb (e.g., `(b *Bot) handleStart`)
+
+4. **File Organization**
+   - One major type or feature per file
+   - Group related handlers together (command.go, admincommand.go, keys.go)
+   - Keep files under 500 lines when possible
+
+### Telegram Bot Patterns
+
+1. **Command Registration**
+   ```go
+   // User commands in registerCommands()
+   b.bh.Handle(b.handleStart, th.CommandEqual("start"))
+   
+   // Admin commands in registerAdminCommands()
+   b.bh.Handle(b.handleAddServer, th.CommandEqual("add_server"))
+   
+   // Callback queries for inline keyboards
+   b.bh.Handle(b.handleHelpCallback, th.CallbackDataContains("help_"))
+   ```
+
+2. **Message Formatting**
+   - User messages: Russian language
+   - Admin notifications: Russian or English as appropriate
+   - Use inline keyboards for better UX
+   - Include back navigation in multi-step flows
+
+3. **Callback Data Convention**
+   - Format: `{action}_{id}` (e.g., `getkey_123`, `help_vpn_setup`)
+   - Keep callback data under 64 bytes (Telegram limit)
+
+### Database Patterns
+
+1. **GORM Models**
+   - Use pointer types for nullable fields (`*int64`, `*int`)
+   - Include `gorm` tags for constraints
+   - Always include `CreatedAt` timestamp
+
+2. **Database Operations**
+   ```go
+   // Pattern: Check existence before creating
+   _, err := b.db.GetUserByUsername(username)
+   if err == nil {
+       // User exists, handle accordingly
+       return
+   }
+   
+   // Create new record
+   if err := b.db.AddUser(user); err != nil {
+       // Handle error
+   }
+   ```
+
+### SSH & X3UI Patterns
+
+1. **Connection Management**
+   - One SSH client per server (stored in ServerHandler)
+   - Reuse X3UI clients across requests
+   - Monitor connection health in background goroutine
+   - Clean up connections on shutdown
+
+2. **Key Generation**
+   - One client per user per server
+   - Email format: `{username}_{chatID}@domain.com`
+   - Reuse existing clients when possible
+   - Generate VLESS URIs with Reality protocol
+
+## File-Specific Guidelines
+
+### When editing internal/telegram/
+- Validate admin access for admin commands: `b.db.IsUserAdmin(userID)`
+- Always answer callback queries to remove loading animation
+- Use `tu.Message()` helper for consistent message creation
+- Include error handling for all bot API calls
+
+### When editing internal/x3ui/
+- Lock mutex when accessing connection maps
+- Always close connections on errors
+- Monitor SSH connection health continuously
+- Log all connection state changes
+
+### When editing internal/database/
+- Use GORM's built-in methods (Create, First, Find, etc.)
+- Return custom errors (ErrUserNotFound, ErrServerNotFound)
+- Use transactions for complex operations
+- Add indexes for frequently queried fields
+
+## Common Tasks
+
+### Adding a New Command
+
+1. Create handler function in appropriate file (command.go for users, admincommand.go for admins)
+2. Register handler in `registerCommands()` or `registerAdminCommands()`
+3. Add help text in help.go if needed
+4. Add constants for callback data if using inline keyboards
+
+### Adding a New Server Field
+
+1. Update Server model in internal/database/models.go
+2. Update database migration (handled by GORM AutoMigrate)
+3. Update /add_server command parsing in admincommand.go
+4. Update server display in /list_servers
+
+### Adding Platform Instructions
+
+1. Add instruction constant in internal/telegram/instructions.go
+2. Add button to vpnOSKeyboard in help.go
+3. Handle callback case in handleHelpCallback
+
+## Security Considerations
+
+1. **Never commit these files to the repository:**
+   - `.env` (environment variables)
+   - SSH private keys
+   - Database credentials
+   
+2. **Access Control:**
+   - All admin commands must verify `IsUserAdmin()`
+   - Invite system enforces user registration
+   - Exclusive servers restricted to `ExclusiveAccess` users
+
+3. **SSH Security:**
+   - Use key-based authentication only
+   - Verify known hosts
+   - Close connections properly to prevent leaks
+
+4. **API Security:**
+   - X3UI APIs accessed via SSH tunnels only
+   - No public exposure of panel ports
+   - Use TLS for bot-to-Telegram communication
+
+## Testing Guidelines
+
+1. **Test Environment Setup:**
+   - Use cmd/testenv/ for test utilities
+   - Separate test database from production
+   - Mock external services when possible
+
+2. **Areas to Test:**
+   - User CRUD operations
+   - Server connection lifecycle
+   - Command handler logic
+   - SSH tunnel reliability
+   - Key generation and formatting
+
+## Environment Variables
+
+Required in .env file:
+```bash
+TELEGRAM_TOKEN=<bot_token>
+DATABASE_URL=postgresql://user:password@host:port/dbname
+SSH_KEY_PATH=/path/to/ssh/private/key
+LOG_LEVEL=debug|info
+```
+
+## Dependencies Management
+
+- Use `go mod tidy` before committing
+- Pin major versions in go.mod
+- Document why dependencies were added
+- Prefer standard library when possible
+
+## Performance Considerations
+
+1. **Connection Pooling:**
+   - Maintain SSH connection pool per server
+   - Reuse X3UI clients across requests
+   - Implement automatic reconnection
+
+2. **Rate Limiting:**
+   - Respect Telegram Bot API limits
+   - Batch message sending with delays
+   - Implement exponential backoff for retries
+
+3. **Database:**
+   - Use connection pooling via GORM
+   - Add indexes on frequently queried fields
+   - Optimize N+1 queries with eager loading
+
+## Error Messages
+
+- User-facing: Russian language, friendly, actionable
+- Logs: English, detailed, include error context
+- Admin notifications: Clear, actionable, include user context
+
+## Localization Notes
+
+- All user-facing messages currently in Russian
+- Commands and callback data in English
+- Flag emojis used for country identification
+- Consider i18n package for future multi-language support
+
+## Git Workflow
+
+1. Feature branches from main
+2. Descriptive commit messages
+3. PR review required for main branch
+4. Keep commits atomic and focused
+5. Document breaking changes in CHANGELOG.md
+
+## Documentation Updates
+
+When making significant changes:
+1. Update ARCHITECTURE.md
+2. Update README.md if setup changes
+3. Add entry to CHANGELOG.md
+4. Update inline comments for complex logic
+
+## Anti-Patterns to Avoid
+
+1. ❌ Don't store passwords in logs
+2. ❌ Don't expose X3UI panel ports publicly
+3. ❌ Don't block main thread with long operations (use goroutines)
+4. ❌ Don't ignore error returns
+5. ❌ Don't hardcode configuration values
+6. ❌ Don't create global mutable state
+7. ❌ Don't use panic for regular error handling
+
+## Useful Commands
+
+```bash
+# Build and run locally
+go run cmd/main.go
+
+# Run with Docker Compose
+docker-compose up --build
+
+# Run tests
+go test ./...
+
+# Format code
+go fmt ./...
+
+# Lint code
+golangci-lint run
+
+# Update dependencies
+go mod tidy
+go mod vendor
+
+# Check for security vulnerabilities
+go list -m all | nancy sleuth
+```
+
+## Resources
+
+- [X3UI Panel Documentation](https://github.com/MHSanaei/3x-ui)
+- [Telego Bot Framework](https://github.com/mymmrac/telego)
+- [GORM Documentation](https://gorm.io/)
+- [Go SSH Package](https://pkg.go.dev/golang.org/x/crypto/ssh)
+- [Xray Protocol](https://xtls.github.io/)
+
+## Questions?
+
+Refer to:
+1. ARCHITECTURE.md for system design details
+2. README.md for setup instructions
+3. Existing code patterns in the codebase
+4. Git history for examples of similar changes

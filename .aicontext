@@ -1,0 +1,132 @@
+{
+  "projectName": "otvali-xray-bot",
+  "description": "Telegram bot for managing VPN (Xray/X3UI) access keys with SSH-tunneled server connections",
+  "language": "Go",
+  "version": "1.23.3",
+  "frameworks": [
+    "Telego (Telegram Bot API)",
+    "GORM (PostgreSQL ORM)",
+    "Docker & Docker Compose"
+  ],
+  "architecture": {
+    "style": "Layered Architecture",
+    "layers": [
+      {
+        "name": "Telegram Interface",
+        "path": "internal/telegram/",
+        "responsibilities": ["Command handlers", "Inline keyboards", "Message formatting"]
+      },
+      {
+        "name": "Business Logic",
+        "path": "internal/x3ui/",
+        "responsibilities": ["VPN key generation", "SSH tunnel management", "Server monitoring"]
+      },
+      {
+        "name": "Data Access",
+        "path": "internal/database/",
+        "responsibilities": ["User management", "Server storage", "GORM models"]
+      }
+    ]
+  },
+  "keyPatterns": [
+    "SSH connection pooling per server",
+    "Middleware for authentication and validation",
+    "Command handler registration pattern",
+    "Graceful shutdown with context cancellation",
+    "Structured logging with slog"
+  ],
+  "dataModels": [
+    {
+      "name": "User",
+      "fields": ["ID", "TelegramID", "Username", "IsAdmin", "InvitedByID", "Invited", "ExclusiveAccess", "CreatedAt"]
+    },
+    {
+      "name": "Server",
+      "fields": ["ID", "Name", "Country", "City", "IP", "SSHPort", "SSHUser", "APIPort", "Username", "Password", "InboundID", "IsExclusive", "CreatedAt"]
+    }
+  ],
+  "codeStyle": {
+    "naming": {
+      "exported": "PascalCase",
+      "unexported": "camelCase",
+      "constants": "PascalCase or ALL_CAPS"
+    },
+    "errorHandling": "Check immediately, log, return user-friendly message",
+    "logging": "Structured logging with slog package",
+    "fileSize": "Keep under 500 lines when possible"
+  },
+  "security": {
+    "sensitiveFiles": [".env", "SSH private keys", "Database credentials"],
+    "accessControl": "Admin commands must verify IsUserAdmin()",
+    "apiAccess": "X3UI APIs accessed via SSH tunnels only",
+    "authentication": "Key-based SSH authentication only"
+  },
+  "environment": {
+    "required": [
+      "TELEGRAM_TOKEN",
+      "DATABASE_URL",
+      "SSH_KEY_PATH",
+      "LOG_LEVEL"
+    ]
+  },
+  "deployment": {
+    "containerization": "Docker with docker-compose.yaml",
+    "database": "PostgreSQL 15 in separate container",
+    "volumes": ["SSH key mounted read-only", "Database persistent volume"]
+  },
+  "testing": {
+    "testUtilities": "cmd/testenv/",
+    "focusAreas": ["User CRUD", "Server connections", "Command handlers", "SSH tunnels", "Key generation"]
+  },
+  "commonTasks": [
+    {
+      "task": "Add new command",
+      "steps": [
+        "Create handler in command.go or admincommand.go",
+        "Register in registerCommands() or registerAdminCommands()",
+        "Add help text in help.go",
+        "Add callback data constants if needed"
+      ]
+    },
+    {
+      "task": "Add new server field",
+      "steps": [
+        "Update Server model in models.go",
+        "Update /add_server parsing",
+        "Update /list_servers display"
+      ]
+    }
+  ],
+  "antiPatterns": [
+    "Blocking main thread with long operations",
+    "Ignoring error returns",
+    "Hardcoding configuration values",
+    "Creating global mutable state",
+    "Using panic for regular errors",
+    "Storing passwords in logs",
+    "Exposing X3UI panels publicly"
+  ],
+  "resources": [
+    {
+      "name": "X3UI Documentation",
+      "url": "https://github.com/MHSanaei/3x-ui"
+    },
+    {
+      "name": "Telego Framework",
+      "url": "https://github.com/mymmrac/telego"
+    },
+    {
+      "name": "GORM ORM",
+      "url": "https://gorm.io/"
+    },
+    {
+      "name": "Go SSH Package",
+      "url": "https://pkg.go.dev/golang.org/x/crypto/ssh"
+    }
+  ],
+  "documentation": [
+    "ARCHITECTURE.md - System design and patterns",
+    "README.md - Setup and deployment",
+    "CHANGELOG.md - Version history"
+  ]
+}

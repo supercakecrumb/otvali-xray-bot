@@ -1,0 +1,72 @@
+# Cline Rules for otvali-xray-bot
+
+## Project Context
+Go-based Telegram bot for VPN (Xray/X3UI) key management. Uses PostgreSQL, SSH tunneling, and Docker deployment.
+
+## Code Standards
+
+### Go Style
+- Follow Go standard conventions (gofmt, golint)
+- Use structured logging (slog package)
+- Error handling: check immediately, log, return user-friendly message
+- Naming: PascalCase for exports, camelCase for private
+
+### File Organization
+- internal/: private application code
+- pkg/: reusable public packages
+- cmd/: entry points
+- Keep files under 500 lines
+
+### Key Patterns
+1. Layered architecture: telegram → x3ui → database
+2. SSH connection pooling in ServerHandler
+3. GORM for database operations
+4. Middleware for auth and validation
+5. Inline keyboards for user interaction
+
+## Important Constraints
+
+### Security
+- Never commit: .env, SSH keys, credentials
+- Admin commands: verify IsUserAdmin()
+- X3UI APIs: access via SSH tunnel only
+- Use key-based SSH auth only
+
+### Telegram Bot
+- Messages: Russian language for users
+- Callback data: format as `{action}_{id}`
+- Always answer callback queries
+- Use structured error messages
+
+### Database
+- Nullable fields: use pointer types (*int64, *int)
+- Include CreatedAt timestamps
+- Check existence before creating
+- Return custom errors (ErrUserNotFound, etc.)
+
+### SSH & X3UI
+- One SSH client per server
+- Reuse X3UI clients
+- Monitor connection health
+- Clean up connections on shutdown
+
+## Common Anti-Patterns to Avoid
+- ❌ Blocking main thread (use goroutines)
+- ❌ Ignoring error returns
+- ❌ Hardcoded config values
+- ❌ Global mutable state
+- ❌ Passwords in logs
+- ❌ Public X3UI panel ports
+
+## Environment Variables
+Required in .env:
+- TELEGRAM_TOKEN
+- DATABASE_URL
+- SSH_KEY_PATH
+- LOG_LEVEL
+
+## Quick References
+- Architecture: ARCHITECTURE.md
+- Setup: README.md
+- X3UI: github.com/MHSanaei/3x-ui
+- Bot Framework: github.com/mymmrac/telego
