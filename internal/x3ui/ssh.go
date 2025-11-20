@@ -221,6 +221,7 @@ func (sh *ServerHandler) createSshConfig(username, keyFile string) (*ssh.ClientC
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: hostKeyCallback,
+		Timeout:         10 * time.Second, // Add connection timeout
 		// HostKeyAlgorithms: []string{ssh.KeyAlgoED25519}, // Uncomment if needed
 	}, nil
 }
@@ -281,21 +282,70 @@ func (sh *ServerHandler) monitorSSHConnections(server *database.Server) {
 		sh.mutex.Unlock()
 
 		if !exists || !isSSHConnectionAlive(client) {
-			sh.logger.Warn("SSH connection lost, reconnecting", slog.String("server", server.Name))
+			sh.logger.Warn("SSH connection lost, reconnecting",
+				slog.String("server", server.Name),
+				slog.Int64("server_id", server.ID))
 
+			// Clean up old connection
 			sh.mutex.Lock()
+			if oldClient, exists := sh.sshClients[server.ID]; exists {
+				oldClient.Close()
+			}
+			if oldListener, exists := sh.listeners[server.ID]; exists {
+				oldListener.Close()
+			}
 			delete(sh.sshClients, server.ID)
+			delete(sh.listeners, server.ID)
+			delete(sh.x3Clients, server.ID)
+			delete(sh.localPorts, server.ID)
 			sh.mutex.Unlock()
 
-			newClient, _, err := sh.StartSSHPortForward(server)
+			// Reconnect with retry
+			var newClient *ssh.Client
+			var localPort int
+			var err error
+
+			for retries := 0; retries < 3; retries++ {
+				if retries > 0 {
+					time.Sleep(time.Duration(retries*2) * time.Second) // Exponential backoff
+				}
+
+				newClient, localPort, err = sh.StartSSHPortForward(server)
+				if err == nil {
+					break
+				}
+				sh.logger.Warn("Reconnection attempt failed",
+					slog.Int("attempt", retries+1),
+					slog.String("error", err.Error()))
+			}
+
 			if err != nil {
-				sh.logger.Error("Failed to reconnect SSH", slog.String("error", err.Error()))
+				sh.logger.Error("Failed to reconnect SSH after retries",
+					slog.String("server", server.Name),
+					slog.String("error", err.Error()))
 				continue
 			}
 
+			// Recreate X3UI client with new port
+			x3Client, err := InitializeX3uiClient(localPort, server.Username, server.Password, sh.logger)
+			if err != nil {
+				sh.logger.Error("Failed to recreate X3UI client",
+					slog.String("server", server.Name),
+					slog.String("error", err.Error()))
+				newClient.Close()
+				continue
+			}
+
+			// Store new connections
 			sh.mutex.Lock()
 			sh.sshClients[server.ID] = newClient
+			sh.x3Clients[server.ID] = x3Client
+			sh.localPorts[server.ID] = localPort
 			sh.mutex.Unlock()
+
+			sh.logger.Info("SSH connection and X3UI client successfully reconnected",
+				slog.String("server", server.Name),
+				slog.Int("local_port", localPort))
 		}
 	}
 }
