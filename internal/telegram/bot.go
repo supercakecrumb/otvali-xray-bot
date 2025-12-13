@@ -68,6 +68,8 @@ func (b *Bot) Start() {
 
 	b.registerAdminCommands()
 
+	b.registerMessagingHandlers()
+
 	b.bh.Start()
 }
 

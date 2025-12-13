@@ -31,7 +31,8 @@ func (b *Bot) handleStart(bot *telego.Bot, update telego.Update) {
 	// Notify admins about command usage
 	b.NotifyAdminsOfCommand(username, chatID, "/start", "")
 
-	welcomeMessage := "Добро пожаловать! Используйте /help, чтобы узнать доступные команды."
+	welcomeMessage := "Добро пожаловать! Используйте /help, чтобы узнать доступные команды.\n\n" +
+		"💬 Для связи с администратором просто напишите сообщение в этом чате."
 
 	msg := tu.Message(
 		tu.ID(chatID),
