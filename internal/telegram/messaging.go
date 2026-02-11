@@ -250,10 +250,10 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 			"👤 Пользователю: @%s (ID: `%d`)\n"+
 			"📨 Ответ: %s\n"+
 			"🕐 Время: %s",
-		adminUsername,
-		originalMsg.Username,
+		escapeMarkdown(adminUsername),
+		escapeMarkdown(originalMsg.Username),
 		originalMsg.UserID,
-		message.Text,
+		escapeMarkdown(message.Text),
 		timestamp,
 	)
 

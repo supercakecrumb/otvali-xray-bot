@@ -115,10 +115,10 @@ func (b *Bot) NotifyAdminsOfAction(username string, chatID int64, action string,
 			"⚡ Действие: %s\n"+
 			"📝 Детали: %s\n"+
 			"🕐 Время: %s",
-		username,
+		escapeMarkdown(username),
 		chatID,
-		action,
-		details,
+		escapeMarkdown(action),
+		escapeMarkdown(details),
 		timestamp,
 	)
 
@@ -144,10 +144,10 @@ func (b *Bot) NotifyAdminsOfError(username string, chatID int64, action string, 
 			"📝 Контекст: %s\n"+
 			"🚨 Ошибка: `%s`\n"+
 			"🕐 Время: %s",
-		username,
+		escapeMarkdown(username),
 		chatID,
-		action,
-		context,
+		escapeMarkdown(action),
+		escapeMarkdown(context),
 		errorMsg,
 		timestamp,
 	)
@@ -209,9 +209,9 @@ func (b *Bot) NotifyAdminsOfKeyRequest(username string, chatID int64, serverName
 				"🖥 Сервер: %s\n"+
 				"✅ Статус: Успешно\n"+
 				"🕐 Время: %s",
-			username,
+			escapeMarkdown(username),
 			chatID,
-			serverName,
+			escapeMarkdown(serverName),
 			timestamp,
 		)
 
@@ -229,9 +229,9 @@ func (b *Bot) NotifyAdminsOfKeyRequest(username string, chatID int64, serverName
 				"❌ Статус: Ошибка\n"+
 				"🚨 Ошибка: `%s`\n"+
 				"🕐 Время: %s",
-			username,
+			escapeMarkdown(username),
 			chatID,
-			serverName,
+			escapeMarkdown(serverName),
 			errorMsg,
 			timestamp,
 		)

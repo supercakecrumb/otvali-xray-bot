@@ -199,7 +199,7 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	cancel() // Stop the animation
 
 	// Edit the message to show the generated key in monospace
-	keyText := fmt.Sprintf("Твой ключ от сервера %v:```%s```Скопируй его и вставь в Hiddify чтобы начать пользоваться", serverName, key)
+	keyText := fmt.Sprintf("Твой ключ от сервера %v:```%s```Скопируй его и вставь в Hiddify чтобы начать пользоваться", escapeMarkdownV2(serverName), key)
 	keyMsg.Text = keyText
 	keyMsg.ParseMode = telego.ModeMarkdownV2
 	keyMsg.ReplyMarkup = backHomeKeyboard
