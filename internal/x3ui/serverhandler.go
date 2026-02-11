@@ -1,6 +1,7 @@
 package x3ui
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"sync"
@@ -22,11 +23,15 @@ type ServerHandler struct {
 	sshClients map[int64]*ssh.Client      // Map of server ID to SSH client
 	localPorts map[int64]int              // Map of server ID to local port
 	listeners  map[int64]net.Listener     // Map of server ID to Listener
-	mutex      sync.Mutex
+	mutex      sync.RWMutex
 	logger     *slog.Logger
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog.Logger) *ServerHandler {
+	ctx, cancel := context.WithCancel(context.Background())
 	sh := ServerHandler{
 		SSHKeyPath: sshKeyPath,
 		x3Clients:  make(map[int64]*x3client.Client),
@@ -34,6 +39,8 @@ func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog
 		localPorts: make(map[int64]int),
 		listeners:  make(map[int64]net.Listener),
 		logger:     logger,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 
 	for i := range servers {
@@ -46,7 +53,11 @@ func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog
 				slog.Int64("server_id", server.ID),
 				slog.String("error", err.Error()),
 			)
-			go sh.retryConnect(&server)
+			sh.wg.Add(1)
+			go func(s *database.Server) {
+				defer sh.wg.Done()
+				sh.retryConnect(s)
+			}(&server)
 		}
 	}
 
@@ -54,9 +65,10 @@ func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog
 }
 
 func (sh *ServerHandler) Close() {
+	if sh.cancel != nil {
+		sh.cancel()
+	}
 	sh.mutex.Lock()
-	defer sh.mutex.Unlock()
-
 	for id := range sh.sshClients {
 		// Close the listener first
 		if listener, exists := sh.listeners[id]; exists {
@@ -82,14 +94,16 @@ func (sh *ServerHandler) Close() {
 		// Remove the x3client.Client
 		delete(sh.x3Clients, id)
 	}
+	sh.mutex.Unlock()
+	sh.wg.Wait()
 }
 
 func (sh *ServerHandler) AddClient(server *database.Server) (*x3client.Client, error) {
 
 	// Check if client already exists
-	sh.mutex.Lock()
+	sh.mutex.RLock()
 	client, exists := sh.x3Clients[server.ID]
-	sh.mutex.Unlock()
+	sh.mutex.RUnlock()
 	if exists {
 		return client, nil
 	}
@@ -127,7 +141,11 @@ func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Cli
 	sh.localPorts[server.ID] = localPort
 	sh.mutex.Unlock()
 
-	go sh.monitorSSHConnections(server)
+	sh.wg.Add(1)
+	go func(s *database.Server) {
+		defer sh.wg.Done()
+		sh.monitorSSHConnections(s)
+	}(server)
 
 	return x3Client, nil
 }
@@ -137,7 +155,11 @@ func (sh *ServerHandler) retryConnect(server *database.Server) {
 	maxBackoff := 2 * time.Minute
 
 	for {
-		time.Sleep(backoff)
+		select {
+		case <-sh.ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
 		if _, err := sh.AddClient(server); err == nil {
 			sh.logger.Info("Successfully connected to server after retry",
 				slog.String("server", server.Name),
@@ -153,4 +175,11 @@ func (sh *ServerHandler) retryConnect(server *database.Server) {
 			}
 		}
 	}
+}
+
+func (sh *ServerHandler) getX3Client(serverID int64) (*x3client.Client, bool) {
+	sh.mutex.RLock()
+	client, exists := sh.x3Clients[serverID]
+	sh.mutex.RUnlock()
+	return client, exists
 }

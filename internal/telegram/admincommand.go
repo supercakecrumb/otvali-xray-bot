@@ -26,6 +26,7 @@ func (b *Bot) registerAdminCommands() {
 func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 	if update.Message == nil {
 		b.logger.Error("Error handling add server command", slog.String("error", "update.Message == nil"))
+		return
 	}
 	message := update.Message
 	chatID := message.Chat.ID
@@ -101,6 +102,15 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		IsExclusive: isExclusive,
 	}
 
+	// Save server to database
+	if err := b.db.AddServer(server); err != nil {
+		b.logger.Error("Failed to add server", slog.String("error", err.Error()))
+		msg := tu.Message(tu.ID(chatID), "Не удалось добавить сервер в базу данных.")
+		_, _ = bot.SendMessage(msg)
+		b.NotifyAdminsOfError(username, chatID, "/add_server", err.Error(), fmt.Sprintf("Не удалось добавить сервер %s в БД", name))
+		return
+	}
+
 	// Connect to the server and set up the x3ui client
 	_, err = b.sh.AddClient(server)
 	if err != nil {
@@ -123,15 +133,9 @@ func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
 		}
 		// Update server with new InboundID
 		server.InboundID = &inbound.ID
-	}
-
-	// Save server to database
-	if err := b.db.AddServer(server); err != nil {
-		b.logger.Error("Failed to add server", slog.String("error", err.Error()))
-		msg := tu.Message(tu.ID(chatID), "Не удалось добавить сервер в базу данных.")
-		_, _ = bot.SendMessage(msg)
-		b.NotifyAdminsOfError(username, chatID, "/add_server", err.Error(), fmt.Sprintf("Не удалось добавить сервер %s в БД", name))
-		return
+		if err := b.db.UpdateServerInboundID(server.ID, inbound.ID); err != nil {
+			b.logger.Error("Failed to update server inbound ID", slog.String("error", err.Error()))
+		}
 	}
 
 	// Notify admins about successful server addition
@@ -217,7 +221,7 @@ func (b *Bot) handleServerExclusivity(bot *telego.Bot, update telego.Update) {
 	}
 
 	args := strings.Fields(message.Text)
-	if len(args) < 2 {
+	if len(args) < 3 {
 		msg := tu.Message(tu.ID(chatID), "Использование: /server_exclusivity <ServerID> <true/false>")
 		_, _ = bot.SendMessage(msg)
 		return

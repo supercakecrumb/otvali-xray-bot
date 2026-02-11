@@ -10,15 +10,20 @@ import (
 )
 
 func (sh *ServerHandler) CreateInbound(server *database.Server) (*x3client.Inbound, error) {
+	x3c, exists := sh.getX3Client(server.ID)
+	if !exists {
+		return nil, fmt.Errorf("x3ui client not found for server %s", server.Name)
+	}
+
 	// Define inbound configuration
-	inboundPayload, err := sh.x3Clients[server.ID].GenerateDefaultInboundConfig(defaultInboundRemark, server.RealityCover, server.IP, defaultInboundPort)
+	inboundPayload, err := x3c.GenerateDefaultInboundConfig(defaultInboundRemark, server.RealityCover, server.IP, defaultInboundPort)
 	if err != nil {
 		sh.logger.Error("Failed to create inbound payload", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("failed to create inbound payload: %w", err)
 	}
 
 	// Create inbound
-	inbound, err := sh.x3Clients[server.ID].AddInbound(inboundPayload)
+	inbound, err := x3c.AddInbound(inboundPayload)
 	if err != nil {
 		sh.logger.Error("Failed to create inbound", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("failed to create inbound: %w", err)
@@ -36,7 +41,10 @@ func (sh *ServerHandler) GetUserKey(server *database.Server, email string, tgID 
 		return "", fmt.Errorf("connection validation failed: %w", err)
 	}
 
-	x3c := sh.x3Clients[server.ID]
+	x3c, exists := sh.getX3Client(server.ID)
+	if !exists {
+		return "", fmt.Errorf("x3ui client not found for server %s", server.Name)
+	}
 
 	inbound, err := sh.getPrimaryInboundWithRetry(server)
 	if err != nil {
@@ -76,7 +84,14 @@ func (sh *ServerHandler) GetUserKey(server *database.Server, email string, tgID 
 }
 
 func (sh *ServerHandler) getPrimaryInbound(server *database.Server) (*x3client.Inbound, error) {
-	x3c := sh.x3Clients[server.ID]
+	if server.InboundID == nil {
+		return nil, fmt.Errorf("primary inbound not set for server %s", server.Name)
+	}
+
+	x3c, exists := sh.getX3Client(server.ID)
+	if !exists {
+		return nil, fmt.Errorf("x3ui client not found for server %s", server.Name)
+	}
 
 	inbounds, err := x3c.ListInbounds()
 	if err != nil {
@@ -96,6 +111,9 @@ func (sh *ServerHandler) getPrimaryInbound(server *database.Server) (*x3client.I
 }
 
 func (sh *ServerHandler) createUserKey(server *database.Server, x3c *x3client.Client, email string, tgID int64) error {
+	if server.InboundID == nil {
+		return fmt.Errorf("primary inbound not set for server %s", server.Name)
+	}
 	newUserConfig := x3c.GenerateDefaultInboundClient(email, tgID)
 	err := x3c.AddInboundClient(*server.InboundID, newUserConfig)
 	if err != nil {
@@ -107,10 +125,10 @@ func (sh *ServerHandler) createUserKey(server *database.Server, x3c *x3client.Cl
 
 // validateConnection checks if SSH and X3UI connections are alive
 func (sh *ServerHandler) validateConnection(server *database.Server) error {
-	sh.mutex.Lock()
+	sh.mutex.RLock()
 	sshClient, sshExists := sh.sshClients[server.ID]
 	x3Client, x3Exists := sh.x3Clients[server.ID]
-	sh.mutex.Unlock()
+	sh.mutex.RUnlock()
 
 	if !sshExists || !x3Exists {
 		return fmt.Errorf("connection not found for server %s", server.Name)

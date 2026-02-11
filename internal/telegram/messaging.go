@@ -109,6 +109,10 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 	}
 
 	for _, admin := range admins {
+		if admin.TelegramID == nil {
+			b.logger.Warn("Admin missing TelegramID, skipping message forward", slog.String("username", admin.Username))
+			continue
+		}
 		msg := tu.Message(
 			tu.ID(*admin.TelegramID),
 			forwardMessage,
@@ -260,6 +264,10 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 	admins, err := b.db.GetAdminUsers()
 	if err == nil {
 		for _, admin := range admins {
+			if admin.TelegramID == nil {
+				b.logger.Warn("Admin missing TelegramID, skipping reply notification", slog.String("username", admin.Username))
+				continue
+			}
 			// Don't notify the admin who sent the reply
 			if *admin.TelegramID == adminID {
 				continue

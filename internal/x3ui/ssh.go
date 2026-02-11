@@ -276,12 +276,19 @@ func findLocalPort(start int) (int, error) {
 }
 
 func (sh *ServerHandler) monitorSSHConnections(server *database.Server) {
-	for {
-		time.Sleep(10 * time.Second) // Check every 10 seconds
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 
-		sh.mutex.Lock()
+	for {
+		select {
+		case <-sh.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		sh.mutex.RLock()
 		client, exists := sh.sshClients[server.ID]
-		sh.mutex.Unlock()
+		sh.mutex.RUnlock()
 
 		if !exists || !isSSHConnectionAlive(client) {
 			sh.logger.Warn("SSH connection lost, reconnecting",
@@ -308,8 +315,15 @@ func (sh *ServerHandler) monitorSSHConnections(server *database.Server) {
 			var err error
 
 			for retries := 0; retries < 3; retries++ {
+				if sh.ctx.Err() != nil {
+					return
+				}
 				if retries > 0 {
-					time.Sleep(time.Duration(retries*2) * time.Second) // Exponential backoff
+					select {
+					case <-sh.ctx.Done():
+						return
+					case <-time.After(time.Duration(retries*2) * time.Second):
+					}
 				}
 
 				newClient, localPort, err = sh.StartSSHPortForward(server)
@@ -322,6 +336,9 @@ func (sh *ServerHandler) monitorSSHConnections(server *database.Server) {
 			}
 
 			if err != nil {
+				if sh.ctx.Err() != nil {
+					return
+				}
 				sh.logger.Error("Failed to reconnect SSH after retries",
 					slog.String("server", server.Name),
 					slog.String("error", err.Error()))

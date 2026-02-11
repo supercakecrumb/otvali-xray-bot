@@ -80,7 +80,9 @@ func (b *Bot) Stop() {
 	b.NotifyAdmins("⚠️ The bot is stopping. Please check the server for details.")
 
 	// Stop the bot handler
-	b.bh.Stop()
+	if b.bh != nil {
+		b.bh.Stop()
+	}
 }
 
 // NotifyAdmins sends a message to all admins
@@ -92,6 +94,10 @@ func (b *Bot) NotifyAdmins(message string) {
 	}
 
 	for _, admin := range admins {
+		if admin.TelegramID == nil {
+			b.logger.Warn("Admin missing TelegramID, skipping notification", slog.String("username", admin.Username))
+			continue
+		}
 		_, err := b.bot.SendMessage(tu.Message(
 			tu.ID(*admin.TelegramID),
 			message,
@@ -256,6 +262,10 @@ func (b *Bot) sendFormattedNotification(message string) {
 	}
 
 	for _, admin := range admins {
+		if admin.TelegramID == nil {
+			b.logger.Warn("Admin missing TelegramID, skipping notification", slog.String("username", admin.Username))
+			continue
+		}
 		msg := tu.Message(
 			tu.ID(*admin.TelegramID),
 			message,
