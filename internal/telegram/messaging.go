@@ -137,18 +137,6 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 			}
 		}
 	}
-
-	// Send acknowledgment to user
-	ackMsg := tu.Message(
-		tu.ID(chatID),
-		"Скоро отвечу",
-	)
-	_, err = bot.SendMessage(ackMsg)
-	if err != nil {
-		b.logger.Error("Failed to send acknowledgment to user",
-			slog.String("username", username),
-			slog.String("error", err.Error()))
-	}
 }
 
 // handleAdminReply handles admin replies to user messages
@@ -214,6 +202,12 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 		tu.ID(originalMsg.UserID),
 		replyText,
 	).WithParseMode(telego.ModeMarkdown)
+	if originalMsg.TelegramMsgID > 0 {
+		replyParams := (&telego.ReplyParameters{}).
+			WithMessageID(originalMsg.TelegramMsgID).
+			WithAllowSendingWithoutReply()
+		userMsg = userMsg.WithReplyParameters(replyParams)
+	}
 
 	_, err = bot.SendMessage(userMsg)
 	if err != nil {
