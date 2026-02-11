@@ -54,6 +54,7 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 	localPort, err := findLocalPort(localPortSearchStart)
 	if err != nil {
 		sh.logger.Error("Error finding local port", slog.String("error", err.Error()))
+		_ = client.Close()
 		return nil, 0, fmt.Errorf("error finding local port: %v", err)
 	}
 	sh.logger.Info("Found available local port", slog.Int("local_port", localPort))
@@ -63,6 +64,7 @@ func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Clie
 	listener, err := net.Listen("tcp", localAddr)
 	if err != nil {
 		sh.logger.Error("Failed to start local listener", slog.String("error", err.Error()))
+		_ = client.Close()
 		return nil, 0, fmt.Errorf("failed to start local listener: %v", err)
 	}
 	sh.logger.Info("Local listener started", slog.String("address", localAddr))

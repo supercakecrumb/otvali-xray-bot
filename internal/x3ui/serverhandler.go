@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	x3client "github.com/supercakecrumb/go-x3ui/client"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
@@ -35,12 +36,17 @@ func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog
 		logger:     logger,
 	}
 
-	for _, server := range servers {
+	for i := range servers {
+		server := servers[i]
 		// Connect to the server and set up the x3ui client
 		_, err := sh.AddClient(&server)
 		if err != nil {
-			logger.Error("Failed to connect to server", slog.String("error", err.Error()))
-			return nil
+			logger.Error("Failed to connect to server, will retry in background",
+				slog.String("server", server.Name),
+				slog.Int64("server_id", server.ID),
+				slog.String("error", err.Error()),
+			)
+			go sh.retryConnect(&server)
 		}
 	}
 
@@ -82,10 +88,11 @@ func (sh *ServerHandler) AddClient(server *database.Server) (*x3client.Client, e
 
 	// Check if client already exists
 	sh.mutex.Lock()
-	if client, exists := sh.x3Clients[server.ID]; exists {
+	client, exists := sh.x3Clients[server.ID]
+	sh.mutex.Unlock()
+	if exists {
 		return client, nil
 	}
-	sh.mutex.Unlock()
 
 	// Establish SSH connection and create x3ui client
 	client, err := sh.connectToServer(server)
@@ -123,4 +130,27 @@ func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Cli
 	go sh.monitorSSHConnections(server)
 
 	return x3Client, nil
+}
+
+func (sh *ServerHandler) retryConnect(server *database.Server) {
+	backoff := 5 * time.Second
+	maxBackoff := 2 * time.Minute
+
+	for {
+		time.Sleep(backoff)
+		if _, err := sh.AddClient(server); err == nil {
+			sh.logger.Info("Successfully connected to server after retry",
+				slog.String("server", server.Name),
+				slog.Int64("server_id", server.ID),
+			)
+			return
+		}
+
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
 }
