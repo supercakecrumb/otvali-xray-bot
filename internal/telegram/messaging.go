@@ -37,7 +37,6 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 	}
 
 	message := update.Message
-	chatID := message.Chat.ID
 	userID := message.From.ID
 	username := message.From.Username
 
