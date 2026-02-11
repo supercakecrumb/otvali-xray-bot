@@ -83,6 +83,8 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 		}
 		displayName += fmt.Sprintf(" (@%s)", username)
 	}
+	displayName = escapeMarkdown(displayName)
+	safeMessageText := escapeMarkdown(message.Text)
 
 	forwardMessage := fmt.Sprintf(
 		"💬 *Сообщение от пользователя*\n\n"+
@@ -93,7 +95,7 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 		displayName,
 		userID,
 		timestamp,
-		message.Text,
+		safeMessageText,
 	)
 
 	b.logger.Info("User message received",
@@ -204,7 +206,7 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 	// Format reply message for user
 	replyText := fmt.Sprintf(
 		"📥 *Ответ от администратора:*\n\n%s",
-		message.Text,
+		escapeMarkdown(message.Text),
 	)
 
 	// Send reply to user
