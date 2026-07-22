@@ -3,6 +3,9 @@ package x3ui
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
+	"strconv"
 	"time"
 
 	x3client "github.com/supercakecrumb/go-x3ui/client"
@@ -80,7 +83,31 @@ func (sh *ServerHandler) GetUserKey(server *database.Server, email string, tgID 
 		return "", err
 	}
 
+	// GenerateVLESSLink builds the host from inbound.Listen, which is intentionally
+	// empty on our servers so Xray binds both IPv4 and IPv6 (required for iOS on
+	// IPv6-only mobile networks). That leaves the link with an empty host, so we
+	// substitute the server's public address (server.IP holds the domain) while
+	// keeping the inbound port and every other query parameter untouched.
+	key, err = replaceVLESSHost(key, server.IP, inbound.Port)
+	if err != nil {
+		sh.logger.Error("error rewriting vless link host", slog.String("error", err.Error()))
+		return "", err
+	}
+
 	return key, nil
+}
+
+// replaceVLESSHost rewrites only the host:port authority of a VLESS link, leaving
+// the client UUID, query parameters (flow, security, pbk, fp, sni, sid, spx, spx)
+// and the remark fragment exactly as GenerateVLESSLink produced them. It is safe
+// when the incoming link has an empty host (inbound.Listen == "").
+func replaceVLESSHost(rawLink, host string, port int) (string, error) {
+	u, err := url.Parse(rawLink)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse vless link %q: %w", rawLink, err)
+	}
+	u.Host = net.JoinHostPort(host, strconv.Itoa(port))
+	return u.String(), nil
 }
 
 func (sh *ServerHandler) getPrimaryInbound(server *database.Server) (*x3client.Inbound, error) {
