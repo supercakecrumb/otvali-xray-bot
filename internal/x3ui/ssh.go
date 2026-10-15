@@ -177,31 +177,7 @@ func (sh *ServerHandler) createSshConfig(username, keyFile string) (*ssh.ClientC
 		return nil, fmt.Errorf("error loading known_hosts: %w", err)
 	}
 
-	// Wrap the callback to handle unknown keys
-	hostKeyCallback := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		err := knownHostsCallback(hostname, remote, key)
-		if err != nil {
-			sh.logger.Warn("Unknown host key, adding to known_hosts", slog.String("host", hostname))
-
-			// Append the new key to the known_hosts file
-			entry := knownhosts.Line([]string{hostname}, key)
-			file, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
-			if err != nil {
-				sh.logger.Error("Failed to open known_hosts for writing", slog.String("path", knownHostsPath), slog.String("error", err.Error()))
-				return err
-			}
-			defer file.Close()
-
-			if _, err := file.WriteString(entry + "\n"); err != nil {
-				sh.logger.Error("Failed to write new key to known_hosts", slog.String("path", knownHostsPath), slog.String("error", err.Error()))
-				return err
-			}
-
-			sh.logger.Info("Added new host key to known_hosts", slog.String("host", hostname))
-			return nil
-		}
-		return err
-	}
+	// Require a pre-provisioned, verified host key. Never trust a changed key.
 
 	key, err := os.ReadFile(keyFile)
 	if err != nil {
@@ -222,7 +198,7 @@ func (sh *ServerHandler) createSshConfig(username, keyFile string) (*ssh.ClientC
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback: hostKeyCallback,
+		HostKeyCallback: ssh.HostKeyCallback(knownHostsCallback),
 		Timeout:         10 * time.Second, // Add connection timeout
 		// HostKeyAlgorithms: []string{ssh.KeyAlgoED25519}, // Uncomment if needed
 	}, nil

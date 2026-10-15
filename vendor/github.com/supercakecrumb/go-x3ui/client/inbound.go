@@ -3,7 +3,6 @@ package client
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"golang.org/x/exp/rand"
@@ -27,8 +26,8 @@ func (c *Client) ListInbounds() ([]Inbound, error) {
 
 	// Handle non-success responses
 	if !response.Success {
-		c.Logger.Error("Failed to fetch inbounds", "message", response.Msg)
-		return nil, fmt.Errorf("failed to fetch inbounds: %s", response.Msg)
+		c.Logger.Error("Failed to fetch inbounds")
+		return nil, fmt.Errorf("failed to fetch inbounds")
 	}
 
 	c.Logger.Info("Successfully fetched inbound list")
@@ -52,17 +51,15 @@ func (c *Client) AddInbound(payload AddInboundPayload) (*Inbound, error) {
 	// Unmarshal the response
 	var response APIResponse[Inbound]
 	if err := json.Unmarshal(resp.Body(), &response); err != nil {
-		c.Logger.Error("Failed to unmarshal response", "error", err, "body", string(resp.Body()))
+		c.Logger.Error("Failed to unmarshal response", "error", err)
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	// Handle non-success responses
 	if !response.Success {
-		c.Logger.Error("Add inbound failed", "message", response.Msg)
-		return nil, fmt.Errorf("add inbound failed: %s", response.Msg)
+		c.Logger.Error("Add inbound failed")
+		return nil, fmt.Errorf("add inbound failed")
 	}
-
-	c.Logger.Debug("Inboud Added", slog.Any("Inbound", response.Obj))
 
 	inbound := &response.Obj
 	c.Logger.Info("Inbound successfully added", "id", inbound.ID, "remark", inbound.Remark, "port", inbound.Port)
@@ -171,14 +168,14 @@ func (c *Client) GetNewCertificate() (CertificateResponse, error) {
 	// Parse the response
 	var certResp FetchCertificateResponse
 	if err := json.Unmarshal(resp.Body(), &certResp); err != nil {
-		c.Logger.Error("Failed to parse certificate response", "error", err, "body", string(resp.Body()))
+		c.Logger.Error("Failed to parse certificate response", "error", err)
 		return CertificateResponse{}, fmt.Errorf("failed to parse certificate response: %w", err)
 	}
 
 	// Check for success
 	if !certResp.Success {
-		c.Logger.Error("Failed to fetch certificate", "message", certResp.Msg)
-		return CertificateResponse{}, fmt.Errorf("certificate fetch failed: %s", certResp.Msg)
+		c.Logger.Error("Failed to fetch certificate")
+		return CertificateResponse{}, fmt.Errorf("certificate fetch failed")
 	}
 
 	c.Logger.Info("Certificate fetched successfully", "publicKey", certResp.Obj.PublicKey)

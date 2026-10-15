@@ -120,3 +120,7 @@ Type in browser http://localhost:2053 and login to panel with login: `admin`, pa
 
 
 Then add this server to telegram bot with command `/add_server`
+
+## Security deployment prerequisites
+
+Provision `known_hosts` in the working directory using independently verified SSH host keys before rollout. Unknown and changed host keys now fail closed. The bot accepts account and credential operations only in private chats belonging to the Telegram sender. Command arguments are redacted in notifications and logs. Rotate panel passwords previously submitted with `/add_server`, and remove old sensitive logs/messages through the approved retention workflow. The vendored go-x3ui client omits credential-bearing response bodies and inbound objects from logs.

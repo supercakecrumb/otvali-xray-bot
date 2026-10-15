@@ -43,7 +43,6 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 		if fromUser == nil {
 			// No user info, cannot proceed
 			b.logger.Warn("No user info in update")
-			next(bot, update)
 			return
 		}
 
@@ -68,7 +67,6 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 
 		if !errors.Is(err, database.ErrUserNotFound) {
 			b.logger.Error("Error retrieving user by TelegramID", slog.String("error", err.Error()))
-			next(bot, update)
 			return
 		}
 
@@ -76,10 +74,14 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 		user, err = b.db.GetUserByUsername(username)
 		if err == nil {
 			// User found by Username
+			if user.TelegramID != nil && *user.TelegramID != telegramID {
+				return
+			}
 			// Update TelegramID
 			if user.TelegramID == nil {
 				if err := b.db.UpdateUserTelegramID(user.ID, telegramID); err != nil {
 					b.logger.Error("Failed to update TelegramID", slog.String("error", err.Error()))
+					return
 				}
 			}
 			// Proceed to next handler
@@ -89,7 +91,6 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 
 		if !errors.Is(err, database.ErrUserNotFound) {
 			b.logger.Error("Error retrieving user by Username", slog.String("error", err.Error()))
-			next(bot, update)
 			return
 		}
 
@@ -100,4 +101,25 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 		)
 		_, _ = bot.SendMessage(msg)
 	}
+}
+
+// privateChatMiddleware keeps account and credential operations in the actor's DM.
+func (b *Bot) privateChatMiddleware() th.Middleware {
+	return func(bot *telego.Bot, update telego.Update, next th.Handler) {
+		if !isPrivateActorUpdate(update) {
+			return
+		}
+		next(bot, update)
+	}
+}
+
+func isPrivateActorUpdate(update telego.Update) bool {
+	if update.Message != nil {
+		return update.Message.From != nil && update.Message.Chat.Type == "private" && update.Message.Chat.ID == update.Message.From.ID
+	}
+	if update.CallbackQuery != nil && update.CallbackQuery.Message != nil {
+		chat := update.CallbackQuery.Message.GetChat()
+		return chat.Type == "private" && chat.ID == update.CallbackQuery.From.ID
+	}
+	return false
 }

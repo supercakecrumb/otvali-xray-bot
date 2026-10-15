@@ -60,6 +60,7 @@ func (b *Bot) Start() {
 	// Middleware in case of panic and no username
 	b.bh.Use(
 		th.PanicRecovery(),
+		b.privateChatMiddleware(),
 		b.userUsernameMiddleware(),
 		b.userDatabaseMiddleware(),
 	)
@@ -171,6 +172,8 @@ func (b *Bot) NotifyAdminsOfError(username string, chatID int64, action string, 
 
 // NotifyAdminsOfCommand sends a notification about a command execution
 func (b *Bot) NotifyAdminsOfCommand(username string, chatID int64, command string, args string) {
+	// Command arguments can contain panel passwords and private messages.
+	args = "[redacted]"
 	timestamp := time.Now().In(time.FixedZone("MSK", 3*60*60)).Format("2006-01-02 15:04:05 MSK")
 
 	argsText := "нет"

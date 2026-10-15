@@ -14,7 +14,7 @@ func (c *Client) Login() error {
 	// Use a context with a value to indicate that we are logging in
 	ctx := context.WithValue(context.Background(), "skipSessionCheck", true)
 
-	c.Logger.Info("Sending login request", slog.String("username", c.Username))
+	c.Logger.Info("Sending login request", slog.String("operation", "login"))
 
 	// Create form-encoded payload
 	formData := url.Values{}
@@ -34,7 +34,7 @@ func (c *Client) Login() error {
 	}
 
 	if resp.StatusCode() != 200 {
-		return fmt.Errorf("login failed: %s", resp.String())
+		return fmt.Errorf("login failed with HTTP status %d", resp.StatusCode())
 	}
 
 	// Set the last login time

@@ -9,7 +9,7 @@ import (
 
 // AddInboundClient adds a new client to the specified inbound
 func (c *Client) AddInboundClient(inboundID int, clientConfig InboundClient) error {
-	c.Logger.Info("Adding client to inbound", "inboundID", inboundID, "email", clientConfig.Email)
+	c.Logger.Info("Adding client to inbound", "inboundID", inboundID)
 
 	// Marshal the clients into JSON
 	clientsJSON, err := json.Marshal(AddInboundClientConfig{
@@ -40,17 +40,17 @@ func (c *Client) AddInboundClient(inboundID int, clientConfig InboundClient) err
 	// Unmarshal the response
 	var response APIResponse[interface{}]
 	if err := json.Unmarshal(resp.Body(), &response); err != nil {
-		c.Logger.Error("Failed to unmarshal response", "error", err, "body", string(resp.Body()))
+		c.Logger.Error("Failed to unmarshal response", "error", err)
 		return fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	// Handle non-success responses
 	if !response.Success {
-		c.Logger.Error("Add client failed", "message", response.Msg)
-		return fmt.Errorf("add client failed: %s", response.Msg)
+		c.Logger.Error("Add client failed")
+		return fmt.Errorf("add client failed")
 	}
 
-	c.Logger.Info("Client successfully added to inbound", "inboundID", inboundID, "email", clientConfig.Email)
+	c.Logger.Info("Client successfully added to inbound", "inboundID", inboundID)
 	return nil
 }
 
@@ -88,8 +88,8 @@ func (c *Client) GetOnlineClients() (OnlinesResponse, error) {
 
 	// Handle non-success responses
 	if !response.Success {
-		c.Logger.Error("Failed to fetch online clients", "message", response.Msg)
-		return nil, fmt.Errorf("failed to fetch online clients: %s", response.Msg)
+		c.Logger.Error("Failed to fetch online clients")
+		return nil, fmt.Errorf("failed to fetch online clients")
 	}
 
 	c.Logger.Info("Successfully fetched online clients")
