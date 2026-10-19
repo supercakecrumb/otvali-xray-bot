@@ -14,7 +14,10 @@ import (
 
 var backHomeKeyboard = tu.InlineKeyboard(
 	tu.InlineKeyboardRow(
-		tu.InlineKeyboardButton("🏠 Домой").WithCallbackData("help_back"),
+		tu.InlineKeyboardButton("📖 Server setup instructions").WithCallbackData(CallbackHelpVPNSetup),
+	),
+	tu.InlineKeyboardRow(
+		tu.InlineKeyboardButton("🏠 Home").WithCallbackData(CallbackHelpBack),
 	),
 )
 
@@ -238,20 +241,26 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	cancel() // Stop the animation
 
 	// Edit the message to show the generated key in monospace
-	keyText := fmt.Sprintf("Твой ключ от сервера %v:```%s```Скопируй его и вставь в Hiddify чтобы начать пользоваться", escapeMarkdownV2(serverName), key)
+	keyText := legacyKeyCaption(serverName, key)
 	keyMsg.Text = keyText
 	keyMsg.ParseMode = telego.ModeMarkdownV2
-	keyMsg.ReplyMarkup = backHomeKeyboard
+	keyMsg.ReplyMarkup = b.withSubscriptionGuides(update, backHomeKeyboard)
 
 	// Notify admins about successful key generation
 	b.NotifyAdminsOfKeyRequest(username, chatID, serverName, true, "")
 
 	_, err = b.bot.EditMessageText(keyMsg)
 	if err != nil {
-		b.logger.Error("Failed to edit message with key", "error", err)
-		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), "Не удалось отправить ключ пользователю (ключ сгенерирован успешно)")
+		// Transport errors can contain the credential-bearing request body.
+		b.logger.Error("Failed to edit message with key")
+		b.NotifyAdminsOfError(username, chatID, "key_generation", "delivery_failed", "Не удалось отправить ключ пользователю (ключ сгенерирован успешно)")
 		return
 	}
+}
+
+func legacyKeyCaption(serverName, key string) string {
+	return "Your server key for " + escapeMarkdownV2(serverName) + ":\n\n```" + key + "```\n\n" +
+		escapeMarkdownV2("Copy this complete vless:// key into Happ or INCY as a server from the clipboard. This is a single-server key, not a subscription URL. Keep your existing Finland profile as a fallback. Open the server setup instructions below or /help for official downloads and import guidance. Keep this key private.")
 }
 
 func (b *Bot) sendMessageWithAnimatedDots(chatID int64, messageID int, loadingText string) (*telego.EditMessageTextParams, context.CancelFunc, error) {

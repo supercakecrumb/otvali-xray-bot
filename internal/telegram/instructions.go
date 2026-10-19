@@ -1,91 +1,36 @@
 package telegram
 
-var (
-	InstructionHiddifyLinux = `<b>Установка Hiddify на Linux:</b>
+const (
+	clientDownloadsHTML = `Choose <a href="https://happ.info/">Happ: official downloads</a> or <a href="https://github.com/INCY-DEV/incy-platforms">INCY: official downloads</a>. Follow the official link for a build that supports your device.`
+	clientImportHTML    = `<b>Import the right kind of access:</b>
+• <b>Finland server key:</b> copy the complete <code>vless://</code> key and import it from the clipboard as a <b>server</b>. It is one server, not a subscription URL.
+• <b>Otvali subscription:</b> copy the complete <code>https://</code> subscription URL and add it as a <b>subscription</b>. Refresh it, select an available profile and connect. Refresh this same URL to receive new profiles.
 
-1. Рекомендуется обновить пакеты на вашей системе (например, в Debian/Ubuntu):
-<pre><code>sudo apt update && sudo apt upgrade -y
-</code></pre>
+App control names vary. Keep your existing Finland profile as a fallback. For optional RU-direct routing and your own exceptions, use the routing guide when it is available below.
 
-2. Скачайте и запустите скрипт установки Hiddify:
-<pre><code>curl -fsSL https://github.com/hiddify/hiddify-config/raw/main/install.sh | bash
-</code></pre>
+<b>Keep keys and subscription URLs private.</b> Both grant VPN access; do not forward or post them.`
+	InstructionLinux = "<b>VPN setup on Linux with Happ or INCY</b>\n\n" + clientDownloadsHTML +
+		"\n\nInstall the official package for your Linux distribution and CPU architecture. Open the app and approve any required network permissions.\n\n" + clientImportHTML
+	InstructionWindows = "<b>VPN setup on Windows with Happ or INCY</b>\n\n" + clientDownloadsHTML +
+		"\n\nInstall the official Windows build for your device. Open the app and approve any required network permissions.\n\n" + clientImportHTML
+	InstructionAndroid = "<b>VPN setup on Android with Happ or INCY</b>\n\n" + clientDownloadsHTML +
+		"\n\nUse the store or Android release linked by the official project. Open the app; approve Android’s system VPN permission when you first connect.\n\n" + clientImportHTML +
+		"\n\n<b>Android TUN / VPN permission denied:</b> disconnect other VPN apps. In Android’s VPN settings, check whether Always-on VPN or Block connections without VPN is assigned to another app. If you intend to switch apps, update that selection, then connect Happ or INCY and approve the system VPN prompt. This local VPN-interface error happens before the server connection; a new server key will not fix that permission."
+	InstructionIOS = "<b>VPN setup on iOS with Happ or INCY</b>\n\n" + clientDownloadsHTML +
+		"\n\nUse the App Store link provided by the official project for your region. Open the app; approve iOS’s system VPN permission when you first connect.\n\n" + clientImportHTML
+	InstructionMacOS = "<b>VPN setup on macOS with Happ or INCY</b>\n\n" + clientDownloadsHTML +
+		"\n\nInstall the official macOS build for your device. Open the app and approve any required VPN/network permissions.\n\n" + clientImportHTML
 
-3. Следуйте инструкциям, которые появятся в терминале.
+	howItWorksText = `<b>How Otvali VPN works</b>
 
-4. <b>Использование ключа:</b>
-   - Получите ключ через команду /get_key или кнопку в меню бота.
-   - Импортируйте полученный ключ в настройки Hiddify.`
+Access is invite-only. An existing member or administrator can use <code>/invite @username</code> to invite someone they trust. Use <code>/get_key</code> to see your available choices.
 
-	InstructionHiddifyWindows = `<b>Установка Hiddify на Windows:</b>
+<b>Server key or subscription?</b>
+A legacy Finland <code>vless://</code> key is a single server configuration. An Otvali <code>https://</code> subscription URL is a refreshable list of available profiles. Import each using the matching option in Happ or INCY. Keep an existing working Finland profile as a fallback.
 
-1. Скачайте установочный файл Hiddify для Windows с <a href="https://hiddify.com/">официальной страницы проекта</a> или используйте подготовленный релиз (если доступен).
+<b>Routing</b>
+Optional client routing can send Russian destinations directly through your own Internet connection. Moscow profiles also apply their own server-side RU-direct policy. A Russian site that needs a foreign IP requires a direct foreign profile and a Proxy exception. Setup and routing guides appear for eligible accounts.
 
-2. Установите программу, следуя инструкциям мастера установки.
-
-3. <b>Использование ключа:</b>
-   - Получите ключ через команду /get_key или кнопку в меню бота.
-   - Импортируйте полученный ключ в настройки Hiddify.`
-
-	InstructionHiddifyAndroid = `<b>Установка Hiddify на Android:</b>
-
-1. Установите приложение Hiddify:
-   - <a href="https://play.google.com/store/apps/details?id=app.hiddify.com&pcampaignid=web_share">Ссылка на Google Play</a> (если приложение доступно в Google Play)
-   - или загрузите APK-файл с <a href="https://hiddify.com/">официальной страницы проекта</a> и установите вручную.
-
-2. Запустите приложение и выполните первичную настройку.
-
-3. <b>Использование ключа:</b>
-   - Получите ключ через команду /get_key или кнопку в меню бота.
-   - Импортируйте полученный ключ в настройки Hiddify (обычно это меню “Import Key” или аналогичное).`
-
-	InstructionHiddifyIOS = `<b>Установка VPN на iOS:</b>
-
-1. <b>Вариант 1: Приложение Happ</b>
-	  - Установите приложение Happ из App Store (рекомендуется, так как Hiddify удалили из App Store)
-	  - Откройте приложение и выполните начальную настройку
-
-2. <b>Вариант 2: Hiddify (если доступно)</b>
-	  - Следуйте инструкциям с <a href="https://hiddify.com/">официального сайта проекта</a> для установки Hiddify альтернативными способами
-
-3. <b>Использование ключа:</b>
-	  - Получите ключ через команду /get_key или кнопку в меню бота
-	  - Импортируйте полученный ключ в настройки приложения (обычно через пункт "Import" или "Import from clipboard")`
-
-	InstructionHiddifyMacOS = `<b>Установка Hiddify на macOS:</b>
-
-1. Установите <a href="https://brew.sh">Homebrew</a>, если у вас его ещё нет:
-<pre><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-</code></pre>
-
-1.1 Или установите его с официального сайта: https://hiddify.com/
-
-2. Установите Hiddify через Homebrew:
-<pre><code>brew install hiddify
-</code></pre>
-
-3. <b>Использование ключа:</b>
-   - Получите ключ через команду /get_key или кнопку в меню бота.
-   - Откройте настройки Hiddify и импортируйте полученный ключ.`
-
-	howItWorksText = `<b>Как это работает?</b>
-
-Этот бот — абсолютно бесплатный. Чтобы получить к нему доступ, нужно получить приглашение от тех, кто уже внутри. Они (то есть вы) могут отправить боту команду <code>/invite @username</code> (например <code>/invite @PavelDurov</code>). Очень советую приглашать только проверенных людей, чтобы автора не посадили.
-
-<b>VLESS + REALITY</b>
-
-Теперь VPN работает на протоколе <b>VLESS с realty</b>. Это современный и высокоэффективный протокол передачи данных, который делает ваше соединение практически невидимым для систем мониторинга РКН. В отличие от более популярных решений, этот протокол поддерживает динамическую маскировку трафика, что делает его крайне сложным для отслеживания и блокировки.
-
-<b>Секьюрно</b>
-
-Все данные, которые вы пропускаете через этот VPN, зашифрованы, их не могут увидеть ни «наблюдатели», ни администратор сервера.
-
-<b>Список серверов</b>
-
-Я планирую расширять список серверов для лучшего распределения нагрузки и большей отказоустойчивости. Лучше сразу забрать конфиги для всех доступных локаций, чтобы всегда быть на связи.
-
-<b>Поддержка проекта</b>
-
-Если захотите поддержать проект, чтобы у нас было больше серверов, можете сделать это в TON, USDT или BTC, отправив донат на Telegram-кошелёк владелицы бота (если вы знаете её юзернейм).
-`
+<b>Privacy and support</b>
+Keys and subscription URLs grant access; keep them private. Send the bot a message to contact the administrators, without including your key or subscription URL.`
 )

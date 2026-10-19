@@ -1,6 +1,9 @@
 package telegram
 
 import (
+	"context"
+	"time"
+
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
 )
@@ -17,23 +20,23 @@ const (
 	CallbackHelpBack       = "help_back"
 )
 
-// Russian messages
 var (
-	helpMessage = "Доступные команды:\n" +
-		"/start - начать работу с ботом\n" +
-		"/help - получить помощь\n" +
-		"/invite - пригласить пользователя\n" +
-		"/get_key - получить ключ для доступа к VPN\n\n" +
-		"💬 Вы можете написать любое сообщение (без команды), и оно будет отправлено администраторам.\n\n" +
-		"Выберите один из вариантов ниже:"
+	helpMessage = "Available commands:\n" +
+		"/start - start the bot\n" +
+		"/help - show help\n" +
+		"/invite - invite a trusted user\n" +
+		"/get_key - choose a VPN server key or subscription\n\n" +
+		"A Finland vless:// key is a single server. An Otvali HTTPS URL is a subscription: add it as a subscription and refresh its profiles. Use Happ or INCY; official links and import instructions are under VPN setup.\n\n" +
+		"💬 Send a message without a command to contact the administrators. Keep keys and subscription URLs private.\n\n" +
+		"Choose an option below:"
 
 	helpKeyboard = tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("🔑 Получить ключ 🔑").WithCallbackData(CallbackGetKey),
+			tu.InlineKeyboardButton("🔑 Get VPN access").WithCallbackData(CallbackGetKey),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("⚙️ Настройка VPN").WithCallbackData(CallbackHelpVPNSetup),
-			tu.InlineKeyboardButton("ℹ️ Как это работает").WithCallbackData(CallbackHelpHowItWorks),
+			tu.InlineKeyboardButton("⚙️ VPN setup").WithCallbackData(CallbackHelpVPNSetup),
+			tu.InlineKeyboardButton("ℹ️ How it works").WithCallbackData(CallbackHelpHowItWorks),
 		),
 	)
 
@@ -48,19 +51,19 @@ var (
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton("🐧 Linux").WithCallbackData(CallbackHelpVPNLinux),
-			tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack),
+			tu.InlineKeyboardButton("⬅️ Back").WithCallbackData(CallbackHelpBack),
 		),
 	)
 
 	helpBackKeyboard = tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack),
+			tu.InlineKeyboardButton("⬅️ Back").WithCallbackData(CallbackHelpBack),
 		),
 	)
 
 	helpVpnBackKeyboard = tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpVPNSetup),
+			tu.InlineKeyboardButton("⬅️ Back").WithCallbackData(CallbackHelpVPNSetup),
 		),
 	)
 )
@@ -70,7 +73,7 @@ func (b *Bot) handleHelp(bot *telego.Bot, update telego.Update) {
 	chatID := update.Message.Chat.ID
 
 	// Create inline keyboard
-	keyboard := helpKeyboard
+	keyboard := b.withSubscriptionGuides(update, helpKeyboard)
 
 	msg := tu.Message(
 		tu.ID(chatID),
@@ -95,22 +98,22 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 
 	switch data {
 	case "help_vpn_setup":
-		text = "Выберите вашу платформу для получения инструкции:"
+		text = "Choose your platform for Happ / INCY setup instructions:"
 		keyboard = vpnOSKeyboard
 	case "help_vpn_linux":
-		text = InstructionHiddifyLinux
+		text = InstructionLinux
 		keyboard = helpVpnBackKeyboard
 	case "help_vpn_windows":
-		text = InstructionHiddifyWindows
+		text = InstructionWindows
 		keyboard = helpVpnBackKeyboard
 	case "help_vpn_android":
-		text = InstructionHiddifyAndroid
+		text = InstructionAndroid
 		keyboard = helpVpnBackKeyboard
 	case "help_vpn_ios":
-		text = InstructionHiddifyIOS
+		text = InstructionIOS
 		keyboard = helpVpnBackKeyboard
 	case "help_vpn_macos":
-		text = InstructionHiddifyMacOS
+		text = InstructionMacOS
 		keyboard = helpVpnBackKeyboard
 	case "help_how_it_works":
 		text = howItWorksText
@@ -123,11 +126,12 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 	}
 
 	editMsg := &telego.EditMessageTextParams{
-		ChatID:      tu.ID(chatID),
-		MessageID:   messageID,
-		Text:        text,
-		ParseMode:   telego.ModeHTML,
-		ReplyMarkup: keyboard,
+		ChatID:             tu.ID(chatID),
+		MessageID:          messageID,
+		Text:               text,
+		ParseMode:          telego.ModeHTML,
+		ReplyMarkup:        b.withSubscriptionGuides(update, keyboard),
+		LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 	}
 	_, err := bot.EditMessageText(editMsg)
 	if err != nil {
@@ -141,4 +145,34 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 	if err != nil {
 		b.logger.Error("Failed to answer callback query", "error", err)
 	}
+}
+
+// Add existing subscription guides without changing help access or issuing access.
+func (b *Bot) withSubscriptionGuides(update telego.Update, keyboard *telego.InlineKeyboardMarkup) *telego.InlineKeyboardMarkup {
+	if !isPrivateActorUpdate(update) || b.stockholm == nil {
+		return keyboard
+	}
+	var actorID int64
+	if update.Message != nil {
+		actorID = update.Message.From.ID
+	} else {
+		actorID = update.CallbackQuery.From.ID
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if !b.stockholm.Eligible(ctx, actorID) {
+		return keyboard
+	}
+	rows := make([][]telego.InlineKeyboardButton, 0, len(keyboard.InlineKeyboard)+2)
+	last := len(keyboard.InlineKeyboard)
+	if last > 0 {
+		last--
+		rows = append(rows, keyboard.InlineKeyboard[:last]...)
+	}
+	rows = append(rows,
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("📖 Subscription setup guide").WithCallbackData(CallbackStockholmGuide)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("🧭 Routing guide").WithCallbackData(CallbackStockholmRouting)),
+	)
+	rows = append(rows, keyboard.InlineKeyboard[last:]...)
+	return tu.InlineKeyboard(rows...)
 }
