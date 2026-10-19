@@ -94,11 +94,14 @@ func TestStockholmMenuPreservesLegacyNavigation(t *testing.T) {
 	issuer := &fakeStockholmIssuer{eligible: true}
 	WithStockholm(issuer)(b)
 	got := b.appendStockholmButton(context.Background(), 42, legacy)
-	if len(got) != 5 || got[0][0].CallbackData != "getkey_8" || got[1][0].CallbackData != CallbackStockholmSubscription || got[2][0].CallbackData != CallbackStockholmGuide || got[3][0].CallbackData != CallbackStockholmRouting || got[4][0].CallbackData != CallbackHelpBack {
+	if len(got) != 6 || got[0][0].CallbackData != "getkey_8" || got[1][0].CallbackData != CallbackStockholmSubscription || got[2][0].CallbackData != CallbackStockholmSubscription || got[3][0].CallbackData != CallbackStockholmGuide || got[4][0].CallbackData != CallbackStockholmRouting || got[5][0].CallbackData != CallbackHelpBack {
 		t.Fatalf("unexpected server navigation: %+v", got)
 	}
 	if got[1][0].Text != "🇸🇪 Sweden, Stockholm (subscription)" {
 		t.Fatal("Stockholm subscription button must use the English location label")
+	}
+	if got[2][0].Text != "🇷🇺 Moscow routes (subscription)" || len(issuer.eligibleIDs) != 1 {
+		t.Fatal("Moscow must share the same subscription and eligibility check")
 	}
 	if len(legacy) != 2 || legacy[1][0].CallbackData != CallbackHelpBack {
 		t.Fatal("legacy navigation was mutated")
@@ -168,6 +171,11 @@ func TestStockholmSubscriptionUsesActorIDAndPrivateDelivery(t *testing.T) {
 	if chatID != 42 || mode != telego.ModeHTML || !strings.Contains(text, "x=1&amp;y=2") || !strings.Contains(text, "subscription") || !strings.Contains(text, "02 Jan 2030, 15:00 MSK") || strings.Contains(text, "Hiddify") {
 		t.Fatalf("unsafe/incomplete subscription rendering: %q", text)
 	}
+	for _, expected := range []string{"Otvali VPN subscription", "Moscow → Stockholm", "Moscow → Finland", "Russian traffic directly from Moscow"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("shared subscription instructions missing %q", expected)
+		}
+	}
 	var keyboard telego.InlineKeyboardMarkup
 	if err := json.Unmarshal(caller.calls[1].body["reply_markup"], &keyboard); err != nil {
 		t.Fatal(err)
@@ -203,6 +211,9 @@ func TestStockholmGuideAcknowledgesPrivateActorWithoutIssuingCredentials(t *test
 	}
 	if chatID != 42 || strings.Contains(text+logs.String(), "private-bearer") || strings.Contains(text, "Hiddify") {
 		t.Fatal("guide must be private, contain no subscription credential and use supported client instructions")
+	}
+	if !strings.Contains(text, "This Otvali subscription supplies standard VLESS/base64") || strings.Contains(text, "ask the administrator for a compatible format") {
+		t.Fatal("guide must describe the verified ordinary subscription format")
 	}
 	var keyboard telego.InlineKeyboardMarkup
 	if err := json.Unmarshal(caller.calls[1].body["reply_markup"], &keyboard); err != nil {
@@ -247,6 +258,9 @@ func TestStockholmRoutingProfilesAreOptInAndUseVerifiedRules(t *testing.T) {
 			}
 			if !strings.Contains(text, "direct foreign server") || !strings.Contains(text, "Proxy exception") || !strings.Contains(text, "IP-check pages") || !strings.Contains(text, "foreign exit IP") || !strings.Contains(text, "ISP IP") {
 				t.Fatal("routing guide must explain foreign-IP exceptions and verify both egress paths")
+			}
+			if !strings.Contains(text, "category-ru") || !strings.Contains(text, "do not rely on the RU bypass") {
+				t.Fatal("routing guide must explain required geo data and its failure limit")
 			}
 			if tc.scheme == "" {
 				if !strings.Contains(text, "ISP IP") || !strings.Contains(text, "Moscow") {

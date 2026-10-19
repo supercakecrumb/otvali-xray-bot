@@ -26,8 +26,8 @@ const stockholmGuideText = "<b>Set up your subscription in Happ or INCY</b>\n\n"
 	"3. <b>Import the subscription.</b> In Happ or INCY, use the option to import from the clipboard or add a subscription URL. Control names vary by app.\n" +
 	"• <b>iOS / Android:</b> approve the system VPN permission when prompted.\n" +
 	"• <b>Windows / macOS / Linux:</b> import the URL into the app’s subscription/profile list and approve any required system permission.\n\n" +
-	"4. <b>Update and connect.</b> Refresh the subscription, select an available server such as Sweden, Stockholm, and connect. Refresh this same subscription to receive new server profiles.\n\n" +
-	"5. <b>Choose routing separately.</b> The routing guide offers an optional ‘RU direct, other traffic VPN’ profile. Happ JSON subscriptions can lock manual routing; custom routing needs a standard VLESS/base64 subscription. If yours is locked, ask the administrator for a compatible format without sharing your URL.\n\n" +
+	"4. <b>Update and connect.</b> Refresh the subscription, choose Sweden, Stockholm, Moscow → Stockholm or Moscow → Finland, and connect. Moscow routes send Russian traffic directly from Moscow and other traffic through the selected foreign exit. Refresh this same subscription to receive new server profiles.\n\n" +
+	"5. <b>Choose routing separately.</b> The routing guide offers an optional ‘RU direct, other traffic VPN’ profile. This Otvali subscription supplies standard VLESS/base64 to Happ and INCY for custom routing. Other providers’ JSON subscriptions can lock manual routing.\n\n" +
 	"<b>Fallback:</b> keep your existing Finland profile. If the new connection fails, select Finland and reconnect.\n\n" +
 	"<b>Keep your subscription URL private.</b> It grants VPN access. Do not forward or post it. You do not need to share the URL to get help."
 
@@ -41,15 +41,16 @@ func (b *Bot) appendStockholmButton(ctx context.Context, actorID int64, buttons 
 		return buttons
 	}
 	row := tu.InlineKeyboardRow(tu.InlineKeyboardButton("🇸🇪 Sweden, Stockholm (subscription)").WithCallbackData(CallbackStockholmSubscription))
+	moscow := tu.InlineKeyboardRow(tu.InlineKeyboardButton("🇷🇺 Moscow routes (subscription)").WithCallbackData(CallbackStockholmSubscription))
 	guide := tu.InlineKeyboardRow(tu.InlineKeyboardButton("📖 Setup guide").WithCallbackData(CallbackStockholmGuide))
 	routing := tu.InlineKeyboardRow(tu.InlineKeyboardButton("🧭 Routing guide").WithCallbackData(CallbackStockholmRouting))
 	// The legacy builder always ends with navigation; preserve its callbacks.
 	if len(buttons) == 0 {
-		return [][]telego.InlineKeyboardButton{row, guide, routing}
+		return [][]telego.InlineKeyboardButton{row, moscow, guide, routing}
 	}
-	result := make([][]telego.InlineKeyboardButton, 0, len(buttons)+3)
+	result := make([][]telego.InlineKeyboardButton, 0, len(buttons)+4)
 	result = append(result, buttons[:len(buttons)-1]...)
-	result = append(result, row, guide, routing, buttons[len(buttons)-1])
+	result = append(result, row, moscow, guide, routing, buttons[len(buttons)-1])
 	return result
 }
 
@@ -70,19 +71,20 @@ func (b *Bot) handleStockholmSubscription(bot *telego.Bot, update telego.Update)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	if b.stockholm == nil || !b.stockholm.Eligible(ctx, callback.From.ID) {
-		b.editStockholmMessage(bot, update, "Stockholm subscriptions are currently unavailable. Please choose another server.", nil)
+		b.editStockholmMessage(bot, update, "VPN subscriptions are currently unavailable. Please choose another server.", nil)
 		return
 	}
 	subscription, err := b.stockholm.Issue(ctx, callback.From.ID)
 	if err != nil || !validSubscriptionURL(subscription.URL) {
 		// Never forward API errors or response bodies to logs or administrators.
 		b.logger.Warn("Stockholm subscription request failed")
-		b.editStockholmMessage(bot, update, "Could not get your Stockholm subscription. Please try again later or contact the administrator.", nil)
+		b.editStockholmMessage(bot, update, "Could not get your VPN subscription. Please try again later or contact the administrator.", nil)
 		return
 	}
 
-	text := "🇸🇪 Sweden, Stockholm (subscription)\n\n<code>" + html.EscapeString(subscription.URL) + "</code>\n\n" +
-		"Copy this URL and add it as a subscription in Happ or INCY. Refresh the subscription, select a server such as Sweden, Stockholm, and connect.\n" +
+	text := "<b>Otvali VPN subscription</b>\n\n<code>" + html.EscapeString(subscription.URL) + "</code>\n\n" +
+		"Copy this URL and add it as a subscription in Happ or INCY. Refresh it, then choose Sweden, Stockholm, Moscow → Stockholm or Moscow → Finland, and connect.\n" +
+		"Moscow routes send Russian traffic directly from Moscow and other traffic through the selected foreign exit.\n" +
 		"Keep your existing Finland profile as a fallback. The guides below cover setup and optional client-side routing."
 	if !subscription.ExpiresAt.IsZero() {
 		text += fmt.Sprintf("\n\nExpires: %s MSK.", subscription.ExpiresAt.In(time.FixedZone("MSK", 3*60*60)).Format("02 Jan 2006, 15:04"))
@@ -122,7 +124,7 @@ func (b *Bot) showStockholmGuide(bot *telego.Bot, update telego.Update, expected
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if b.stockholm == nil || !b.stockholm.Eligible(ctx, callback.From.ID) {
-		b.editStockholmMessage(bot, update, "Stockholm subscriptions are currently unavailable. Please choose another server.", nil)
+		b.editStockholmMessage(bot, update, "VPN subscriptions are currently unavailable. Please choose another server.", nil)
 		return
 	}
 	b.editStockholmMessage(bot, update, text, keyboard)
