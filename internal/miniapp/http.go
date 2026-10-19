@@ -15,14 +15,17 @@ import (
 )
 
 var (
-	ErrForbidden   = errors.New("forbidden")
-	ErrUnavailable = errors.New("unavailable")
-	ErrNotFound    = errors.New("not found")
+	ErrForbidden      = errors.New("forbidden")
+	ErrAccessDisabled = errors.New("access disabled")
+	ErrUnavailable    = errors.New("unavailable")
+	ErrNotFound       = errors.New("not found")
 )
 
 type Account struct {
-	Managed       bool `json:"managed"`
-	LegacyFinland bool `json:"legacy_finland"`
+	Managed            bool   `json:"managed"`
+	LegacyFinland      bool   `json:"legacy_finland"`
+	ManagedState       string `json:"managed_state,omitempty"`
+	LegacyFinlandState string `json:"legacy_finland_state,omitempty"`
 }
 type Subscription struct {
 	URL               string     `json:"url"`
@@ -249,6 +252,8 @@ func (h *handler) allow(id int64) bool {
 
 func writeBackendError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrAccessDisabled):
+		writeError(w, 403, "access_disabled")
 	case errors.Is(err, ErrForbidden):
 		writeError(w, 403, "forbidden")
 	case errors.Is(err, ErrNotFound):

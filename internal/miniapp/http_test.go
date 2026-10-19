@@ -209,3 +209,26 @@ func TestMiniAppConfigDefaultsOffAndRequiresExactOrigins(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPAccessDisabledAndNotFoundAreNotTransientErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{{ErrAccessDisabled, 403, "access_disabled"}, {ErrNotFound, 404, "not_found"}, {ErrUnavailable, 503, "unavailable"}} {
+		h, backend := newTestHandler(t)
+		backend.err = tc.err
+		response := request(h, "/api/miniapp/subscription", "{}", nil)
+		var body struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(response.Body.Bytes(), &body) != nil || response.Code != tc.status || body.Error.Code != tc.code {
+			t.Fatal("access state lost its stable HTTP classification")
+		}
+		if !strings.Contains(response.Header().Get("Cache-Control"), "no-store") {
+			t.Fatal("access failure must remain private")
+		}
+	}
+}

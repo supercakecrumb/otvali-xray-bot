@@ -2,11 +2,13 @@ package miniapp
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/x3ui"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -17,11 +19,13 @@ type Store interface {
 }
 type ManagedIssuer interface {
 	Eligible(context.Context, int64) bool
+	Status(context.Context, int64) (remnawave.AccessState, error)
 	Issue(context.Context, int64) (remnawave.Subscription, error)
 	Keys(context.Context, int64) ([]remnawave.ServerKey, error)
 }
 type LegacyIssuer interface {
 	IsServerDisabled(int64) bool
+	CheckUserKeyForTelegramID(context.Context, *database.Server, string, int64) error
 	GetUserKeyForTelegramID(context.Context, *database.Server, string, int64) (string, error)
 }
 type Service struct {
@@ -63,13 +67,69 @@ func (s *Service) legacyServer(ctx context.Context, user *database.User) (*datab
 	}
 	return server, true
 }
+func managedError(err error) error {
+	switch {
+	case errors.Is(err, remnawave.ErrInactive), errors.Is(err, remnawave.ErrConflict):
+		return ErrAccessDisabled
+	case errors.Is(err, remnawave.ErrNotFound):
+		return ErrNotFound
+	case errors.Is(err, remnawave.ErrNotEligible):
+		return ErrForbidden
+	default:
+		return ErrUnavailable
+	}
+}
+func legacyError(err error) error {
+	switch {
+	case errors.Is(err, x3ui.ErrKeyNotFound):
+		return ErrNotFound
+	case errors.Is(err, x3ui.ErrKeyDisabled), errors.Is(err, x3ui.ErrKeyConflict):
+		return ErrAccessDisabled
+	default:
+		return ErrUnavailable
+	}
+}
+func stateForError(err error) string {
+	switch {
+	case errors.Is(err, ErrAccessDisabled):
+		return "access_disabled"
+	case errors.Is(err, ErrNotFound):
+		return "not_found"
+	case errors.Is(err, ErrForbidden):
+		return "not_eligible"
+	default:
+		return "unavailable"
+	}
+}
+func (s *Service) legacyReady(ctx context.Context, user *database.User) bool {
+	server, ok := s.legacyServer(ctx, user)
+	return ok && s.legacy.CheckUserKeyForTelegramID(ctx, server, user.Username, *user.TelegramID) == nil
+}
 func (s *Service) Account(ctx context.Context, id int64) (Account, error) {
 	user, err := s.bound(ctx, id)
 	if err != nil {
 		return Account{}, err
 	}
-	_, legacy := s.legacyServer(ctx, user)
-	return Account{Managed: s.managed != nil && s.managed.Eligible(ctx, id), LegacyFinland: legacy}, nil
+	result := Account{ManagedState: "not_eligible", LegacyFinlandState: "not_eligible"}
+	if s.managed != nil && s.managed.Eligible(ctx, id) {
+		state, err := s.managed.Status(ctx, id)
+		if err != nil {
+			result.ManagedState = stateForError(managedError(err))
+		} else {
+			result.Managed = state == remnawave.AccessReady || state == remnawave.AccessUnprovisioned
+			result.ManagedState = string(state)
+		}
+	}
+	if server, ok := s.legacyServer(ctx, user); ok {
+		err := s.legacy.CheckUserKeyForTelegramID(ctx, server, user.Username, id)
+		if err != nil {
+			result.LegacyFinlandState = stateForError(legacyError(err))
+		} else {
+			result.LegacyFinland = true
+			result.LegacyFinlandState = "ready"
+		}
+	}
+	return result, nil
 }
 func (s *Service) Subscription(ctx context.Context, id int64) (Subscription, error) {
 	if _, err := s.bound(ctx, id); err != nil {
@@ -80,7 +140,7 @@ func (s *Service) Subscription(ctx context.Context, id int64) (Subscription, err
 	}
 	value, err := s.managed.Issue(ctx, id)
 	if err != nil {
-		return Subscription{}, ErrUnavailable
+		return Subscription{}, managedError(err)
 	}
 	u, err := url.Parse(value.URL)
 	if err != nil || len(value.URL) > 4096 || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
@@ -99,7 +159,7 @@ func (s *Service) Keys(ctx context.Context, id int64) ([]Key, error) {
 		return nil, err
 	}
 	result := []Key{}
-	if _, ok := s.legacyServer(ctx, user); ok {
+	if s.legacyReady(ctx, user) {
 		result = append(result, Key{ID: "legacy_fi", Name: "Finland, Helsinki"})
 	}
 	if s.managed != nil && s.managed.Eligible(ctx, id) {
@@ -108,7 +168,7 @@ func (s *Service) Keys(ctx context.Context, id int64) ([]Key, error) {
 			if len(result) > 0 {
 				return result, nil
 			}
-			return nil, ErrUnavailable
+			return nil, managedError(err)
 		}
 		for _, key := range keys {
 			if keyID.MatchString(key.ID) {
@@ -129,7 +189,10 @@ func (s *Service) Key(ctx context.Context, id int64, selected string) (Key, erro
 			return Key{}, ErrForbidden
 		}
 		raw, err := s.legacy.GetUserKeyForTelegramID(ctx, server, user.Username, id)
-		if err != nil || !validKey(raw) {
+		if err != nil {
+			return Key{}, legacyError(err)
+		}
+		if !validKey(raw) {
 			return Key{}, ErrUnavailable
 		}
 		return Key{ID: selected, Name: "Finland, Helsinki", URL: raw}, nil
@@ -142,7 +205,7 @@ func (s *Service) Key(ctx context.Context, id int64, selected string) (Key, erro
 	}
 	keys, err := s.managed.Keys(ctx, id)
 	if err != nil {
-		return Key{}, ErrUnavailable
+		return Key{}, managedError(err)
 	}
 	for _, key := range keys {
 		if key.ID == selected && validKey(key.URL) {

@@ -3,6 +3,7 @@ package x3ui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,12 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/serverpolicy"
 )
+
+// Synthetic panel encoding; production Mini App never writes clients.
+type numericPanelClient struct {
+	x3client.InboundClient
+	TelegramID *int64 `json:"tgId"`
+}
 
 func numericInbound(t *testing.T, clients []x3client.InboundClient) *x3client.Inbound {
 	t.Helper()
@@ -116,57 +123,48 @@ func TestNumericHelperPreservesUUIDAndSharesBotLock(t *testing.T) {
 	}
 }
 
-func TestNumericHelperReconcilesAmbiguousCreateAndNeverDuplicates(t *testing.T) {
-	id := int64(42)
-	inboundID := 2
-	inbound := numericInbound(t, nil)
-	writes := 0
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/panel/inbound/list":
-			json.NewEncoder(w).Encode(map[string]any{"success": true, "obj": []x3client.Inbound{*inbound}})
-		case "/panel/inbound/addClient":
-			writes++
-			var payload struct {
-				ID       int    `json:"id"`
-				Settings string `json:"settings"`
+func TestNumericHelperNeverCreatesForNewOrDeletedClient(t *testing.T) {
+	for _, mode := range []string{"never_provisioned", "deleted_after_retrieval"} {
+		t.Run(mode, func(t *testing.T) {
+			id := int64(42)
+			inboundID := 2
+			clients := []x3client.InboundClient{}
+			if mode == "deleted_after_retrieval" {
+				clients = append(clients, x3client.InboundClient{ID: "00000000-0000-4000-8000-000000000001", Email: "owned", Enable: true, TgID: x3client.FlexibleInt64{Value: &id}})
 			}
-			if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.ID != inboundID {
-				t.Error("unexpected create payload")
-				w.WriteHeader(400)
-				return
+			inbound := numericInbound(t, clients)
+			writes := 0
+			httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path != "/panel/inbound/list" {
+					writes++
+					w.WriteHeader(500)
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]any{"success": true, "obj": []x3client.Inbound{*inbound}})
+			}))
+			defer httpServer.Close()
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			sh := NewServerHandler("unused", nil, logger, serverpolicy.Policy{})
+			defer sh.Close()
+			sh.x3Clients[1] = &x3client.Client{Resty: resty.New().SetBaseURL(httpServer.URL), Logger: logger}
+			server := &database.Server{ID: 1, IP: "fi.example", InboundID: &inboundID}
+			if mode == "deleted_after_retrieval" {
+				key, err := sh.GetUserKeyForTelegramID(context.Background(), server, "owned", id)
+				if err != nil || key == "" {
+					t.Fatal("existing retrieval failed")
+				}
+				inbound = numericInbound(t, nil)
 			}
-			var settings struct {
-				Clients []x3client.InboundClient `json:"clients"`
+			if _, err := sh.GetUserKeyForTelegramID(context.Background(), server, "owned", id); !errors.Is(err, ErrKeyNotFound) {
+				t.Fatal("absent/deleted credential must remain not_found")
 			}
-			if json.Unmarshal([]byte(payload.Settings), &settings) != nil || len(settings.Clients) != 1 || settings.Clients[0].TgID.Value == nil || *settings.Clients[0].TgID.Value != id {
-				t.Error("new client lacks authenticated numeric identity")
-				w.WriteHeader(400)
-				return
+			if err := sh.CheckUserKeyForTelegramID(context.Background(), server, "owned", id); !errors.Is(err, ErrKeyNotFound) {
+				t.Fatal("status must not claim an absent credential is ready")
 			}
-			inbound = numericInbound(t, settings.Clients)
-			// The remote write succeeded but its response failed. Numeric readback
-			// must reconcile it without issuing a second AddClient request.
-			w.WriteHeader(502)
-			w.Write([]byte(`{"success":false}`))
-		default:
-			t.Error("unexpected panel path")
-			w.WriteHeader(404)
-		}
-	}))
-	defer httpServer.Close()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sh := NewServerHandler("unused", nil, logger, serverpolicy.Policy{})
-	defer sh.Close()
-	sh.x3Clients[1] = &x3client.Client{Resty: resty.New().SetBaseURL(httpServer.URL), Logger: logger}
-	server := &database.Server{ID: 1, IP: "fi.example", InboundID: &inboundID}
-	first, err := sh.GetUserKeyForTelegramID(context.Background(), server, "stored_name", id)
-	if err != nil {
-		t.Fatal("ambiguous successful write was not reconciled")
-	}
-	second, err := sh.GetUserKeyForTelegramID(context.Background(), server, "stored_name", id)
-	if err != nil || second != first || writes != 1 {
-		t.Fatal("retrieval changed UUID or duplicated client")
+			if writes != 0 {
+				t.Fatal("Mini App recreated a deleted or never-provisioned client")
+			}
+		})
 	}
 }

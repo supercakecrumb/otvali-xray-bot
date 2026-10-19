@@ -224,7 +224,13 @@ an additional restriction, never a replacement for authentication.
 | `POST /api/miniapp/keys` | `{}` | `{"keys":[{"id":"opaque16hex","name":"…"},{"id":"legacy_fi","name":"Finland, Helsinki"}]}` |
 | `POST /api/miniapp/key` | `{"id":"opaque16hex"}` or `{"id":"legacy_fi"}` | `{"key":{"id":"…","name":"…","url":"vless://…"}}` |
 
-Session checks are read-only and never create grants. Issuance/listing actions
+Session checks are read-only and never create grants. Additive `managed_state`
+and `legacy_finland_state` fields distinguish `ready`, `eligible_unprovisioned`
+(managed only), `access_disabled`, `not_found`, `unavailable`, and `not_eligible`.
+The existing booleans remain compatible: managed access is offered when ready
+or explicitly eligible but unprovisioned; known inactive accounts are false.
+Legacy Finland is true only after a current numeric-owned active client check.
+Issuance/listing actions
 require an explicit frontend action. Managed actions use the same bot service,
 immutable grant mapping and current approved numeric cohort; listing exposes
 names/opaque IDs only, and selecting a key fetches that same account's current
@@ -232,15 +238,18 @@ profiles. No automatic signup, invitation binding, expiry extension or disabled
 account reactivation occurs. Legacy Finland checks the existing bound numeric
 user, server policy and exclusive role; ownership is proved by the panel's
 numeric Telegram ID. An unbound historical credential cannot be claimed by a
-matching username. Its existing UUID/email remain unchanged, and a shared lock
-serializes bot and API issuance. A new legacy client is added only when the
-stored username is unused, then reconciled by numeric readback.
+matching username. Its existing UUID/email remain unchanged, and a shared lock serializes
+Mini App reads with the bot's existing issuance path. Mini App Finland is
+**existing-only**: missing, deleted or never-provisioned clients are never
+created or recreated by session, listing or retrieval. Legacy bot provisioning
+retains its existing behavior. Known disabled/expired/deleted/conflicting
+managed access is read without renewal and reported separately from outages.
 
 All private responses and errors use `Cache-Control: no-store, private`.
 Requests have bounded headers/bodies, strict fields, timeouts, eight in-flight
 slots, 20 requests per numeric account per minute and 300 globally per minute.
 Errors contain only `{"error":{"code":"…"}}` with `unauthorized`, `forbidden`,
-`invalid_request`, `rate_limited`, `unavailable`, `not_found`, or
+`invalid_request`, `rate_limited`, `access_disabled`, `unavailable`, `not_found`, or
 `method_not_allowed`; credentials and raw provider errors are never logged.
 The frontend must keep initData/keys/subscriptions in memory only, render them
 as text, and send none in query strings, analytics, storage or error reports.
