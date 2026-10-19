@@ -33,6 +33,7 @@ type ServerHandler struct {
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 	policy     serverpolicy.Policy
+	keyLocks   [64]sync.Mutex
 }
 
 func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog.Logger, policy serverpolicy.Policy) *ServerHandler {

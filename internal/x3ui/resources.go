@@ -36,6 +36,13 @@ func (sh *ServerHandler) CreateInbound(server *database.Server) (*x3client.Inbou
 }
 
 func (sh *ServerHandler) GetUserKey(server *database.Server, email string, tgID int64) (string, error) {
+	lock := &sh.keyLocks[uint64(tgID)%uint64(len(sh.keyLocks))]
+	lock.Lock()
+	defer lock.Unlock()
+	return sh.getUserKey(server, email, tgID)
+}
+
+func (sh *ServerHandler) getUserKey(server *database.Server, email string, tgID int64) (string, error) {
 	if sh.IsServerDisabled(server.ID) {
 		return "", fmt.Errorf("%w: %d", ErrServerDisabled, server.ID)
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 
+	"github.com/supercakecrumb/otvali-xray-bot/internal/miniapp"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/serverpolicy"
 )
@@ -15,6 +16,7 @@ type Config struct {
 	VPNHelpURL    string
 	ServerPolicy  serverpolicy.Policy
 	Stockholm     remnawave.Config
+	MiniApp       miniapp.Config
 }
 
 func LoadConfig() (Config, error) {
@@ -26,7 +28,12 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	mini, err := miniapp.LoadConfig(os.Getenv)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
+		MiniApp:       mini,
 		TelegramToken: os.Getenv("TELEGRAM_TOKEN"),
 		LogLevel:      os.Getenv("LOG_LEVEL"),
 		DatabaseURL:   os.Getenv("DATABASE_URL"),

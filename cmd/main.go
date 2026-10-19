@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/miniapp"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/runtimehealth"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/telegram"
@@ -76,13 +81,16 @@ func run() int {
 
 	// Start the bot
 	botOptions := []telegram.Option{guideOption}
+	var managed miniapp.ManagedIssuer
 	if cfg.Stockholm.Enabled {
 		client, err := remnawave.NewClient(cfg.Stockholm)
 		if err != nil {
 			log.Error("Invalid Stockholm configuration")
 			return 1
 		}
-		botOptions = append(botOptions, telegram.WithStockholm(remnawave.NewService(cfg.Stockholm, client, db)))
+		service := remnawave.NewService(cfg.Stockholm, client, db)
+		managed = service
+		botOptions = append(botOptions, telegram.WithStockholm(service))
 		log.Info("Stockholm subscriptions enabled", "eligible_ids", len(cfg.Stockholm.AllowedTelegramIDs))
 	}
 	bot, err := telegram.NewBot(cfg.TelegramToken, log, db, serverHandler, botOptions...)
@@ -91,6 +99,33 @@ func run() int {
 		return 1
 	}
 	defer bot.Stop()
+
+	var apiServer *http.Server
+	var apiErrors <-chan error
+	if cfg.MiniApp.Enabled {
+		handler, err := miniapp.NewHandler(cfg.MiniApp, cfg.TelegramToken, miniapp.NewService(db, managed, serverHandler), pool)
+		if err != nil {
+			log.Error("Invalid Mini App configuration")
+			return 1
+		}
+		listener, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(cfg.MiniApp.Port)))
+		if err != nil {
+			log.Error("Mini App listener unavailable")
+			return 1
+		}
+		apiServer = miniapp.NewHTTPServer(listener.Addr().String(), handler)
+		apiServer.BaseContext = func(net.Listener) context.Context { return ctx }
+		failures := make(chan error, 1)
+		apiErrors = failures
+		go func() {
+			err := apiServer.Serve(listener)
+			if errors.Is(err, http.ErrServerClosed) {
+				err = nil
+			}
+			failures <- err
+		}()
+		log.Info("Mini App API enabled")
+	}
 
 	healthDone := make(chan struct{})
 	go func() {
@@ -109,6 +144,11 @@ func run() int {
 	exitCode := 0
 	select {
 	case <-ctx.Done():
+	case <-apiErrors:
+		if ctx.Err() == nil {
+			log.Error("Mini App API stopped unexpectedly")
+			exitCode = 1
+		}
 	case <-botDone:
 		if ctx.Err() == nil {
 			log.Error("Bot stopped unexpectedly")
@@ -116,6 +156,13 @@ func run() int {
 		}
 	}
 	stop()
+	if apiServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if apiServer.Shutdown(shutdownCtx) != nil {
+			_ = apiServer.Close()
+		}
+		cancel()
+	}
 	<-healthDone
 	log.Info("Shutting down gracefully...")
 	return exitCode

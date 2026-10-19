@@ -198,3 +198,50 @@ An eventual Finland import must preserve hostname, port, each VLESS UUID,
 REALITY keys/short IDs/SNI and flow. Its current 85 Vision and three empty-flow
 credentials need compatibility qualification before changing the live listener.
 Do not infer Telegram ownership from a matching historical username.
+
+## Optional Telegram Mini App API
+
+`MINIAPP_ENABLED=false` leaves the HTTP listener closed. Enable only behind the
+approved HTTPS reverse proxy, using private container `MINIAPP_PORT=8080` and
+exact `MINIAPP_ALLOWED_ORIGINS` from `.env.example`. Do not publish a Docker host
+port. `GET /health` checks PostgreSQL without depending on Remnawave; the bot's
+existing silent heartbeat health check remains unchanged.
+
+The frontend sends `Authorization: tma <Telegram.WebApp.initData>` and
+`Content-Type: application/json` on every private POST. The backend verifies
+Telegram's [official bot-token HMAC contract](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app),
+including all signed fields except `hash`, and accepts `auth_date` for at most
+five minutes with a 30-second future clock allowance. Reopen the Mini App when
+that launch data expires. Use a menu/inline web-app button or main Mini App;
+reply-keyboard launch does not supply the required signed user data. No cookie,
+local login account or frontend-selected Telegram ID is accepted. Origins are
+an additional restriction, never a replacement for authentication.
+
+| Endpoint | JSON request | Success response |
+|---|---|---|
+| `POST /api/miniapp/session` | `{}` | `{"account":{"managed":true,"legacy_finland":true}}` |
+| `POST /api/miniapp/subscription` | `{}` | `{"subscription":{"url":"…","expires_at":null,"traffic_limit_bytes":0}}` |
+| `POST /api/miniapp/keys` | `{}` | `{"keys":[{"id":"opaque16hex","name":"…"},{"id":"legacy_fi","name":"Finland, Helsinki"}]}` |
+| `POST /api/miniapp/key` | `{"id":"opaque16hex"}` or `{"id":"legacy_fi"}` | `{"key":{"id":"…","name":"…","url":"vless://…"}}` |
+
+Session checks are read-only and never create grants. Issuance/listing actions
+require an explicit frontend action. Managed actions use the same bot service,
+immutable grant mapping and current approved numeric cohort; listing exposes
+names/opaque IDs only, and selecting a key fetches that same account's current
+profiles. No automatic signup, invitation binding, expiry extension or disabled
+account reactivation occurs. Legacy Finland checks the existing bound numeric
+user, server policy and exclusive role; ownership is proved by the panel's
+numeric Telegram ID. An unbound historical credential cannot be claimed by a
+matching username. Its existing UUID/email remain unchanged, and a shared lock
+serializes bot and API issuance. A new legacy client is added only when the
+stored username is unused, then reconciled by numeric readback.
+
+All private responses and errors use `Cache-Control: no-store, private`.
+Requests have bounded headers/bodies, strict fields, timeouts, eight in-flight
+slots, 20 requests per numeric account per minute and 300 globally per minute.
+Errors contain only `{"error":{"code":"…"}}` with `unauthorized`, `forbidden`,
+`invalid_request`, `rate_limited`, `unavailable`, `not_found`, or
+`method_not_allowed`; credentials and raw provider errors are never logged.
+The frontend must keep initData/keys/subscriptions in memory only, render them
+as text, and send none in query strings, analytics, storage or error reports.
+A managed-provider failure leaves the legacy Finland action independent.
