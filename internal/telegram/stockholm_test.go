@@ -3,10 +3,8 @@ package telegram
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"html"
 	"log/slog"
 	"strings"
 	"testing"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/mymmrac/telego"
 	ta "github.com/mymmrac/telego/telegoapi"
-	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
 )
 
@@ -56,7 +53,7 @@ func (r *stockholmTelegramCaller) Call(url string, data *ta.RequestData) (*ta.Re
 	if method == r.failMethod {
 		return nil, errors.New("sensitive-telegram-request-content")
 	}
-	if method == "editMessageText" {
+	if method == "editMessageText" || method == "sendMessage" {
 		return &ta.Response{Ok: true, Result: []byte(`{"message_id":17,"chat":{"id":42,"type":"private"}}`)}, nil
 	}
 	return &ta.Response{Ok: true, Result: []byte(`true`)}, nil
@@ -85,321 +82,139 @@ func stockholmUpdate() telego.Update {
 	}}
 }
 
-func TestStockholmMenuPreservesLegacyNavigation(t *testing.T) {
-	b := testBotWithDisabledServer(t)
-	legacy := b.buildServerButtons([]database.Server{{ID: 7, Country: "Estonia", City: "Narva"}, {ID: 8, Country: "Finland", City: "Helsinki"}})
-	if got := b.appendStockholmButton(context.Background(), 42, legacy); len(got) != 2 {
-		t.Fatal("Stockholm must be hidden by default")
+func callText(t *testing.T, call recordedTelegramCall) string {
+	t.Helper()
+	var text string
+	if err := json.Unmarshal(call.body["text"], &text); err != nil {
+		t.Fatal(err)
 	}
+	return text
+}
+
+func callKeyboard(t *testing.T, call recordedTelegramCall) *telego.InlineKeyboardMarkup {
+	t.Helper()
+	var keyboard telego.InlineKeyboardMarkup
+	if err := json.Unmarshal(call.body["reply_markup"], &keyboard); err != nil {
+		t.Fatal(err)
+	}
+	return &keyboard
+}
+
+func callbacks(keyboard *telego.InlineKeyboardMarkup) []string {
+	var result []string
+	for _, row := range keyboard.InlineKeyboard {
+		for _, button := range row {
+			if button.CallbackData != "" {
+				result = append(result, button.CallbackData)
+			}
+		}
+	}
+	return result
+}
+
+func TestSingleSubscriptionAccessMenu(t *testing.T) {
 	issuer := &fakeStockholmIssuer{eligible: true}
-	WithStockholm(issuer)(b)
-	got := b.appendStockholmButton(context.Background(), 42, legacy)
-	if len(got) != 6 || got[0][0].CallbackData != "getkey_8" || got[1][0].CallbackData != CallbackStockholmSubscription || got[2][0].CallbackData != CallbackStockholmSubscription || got[3][0].CallbackData != CallbackStockholmGuide || got[4][0].CallbackData != CallbackStockholmRouting || got[5][0].CallbackData != CallbackHelpBack {
-		t.Fatalf("unexpected server navigation: %+v", got)
+	b, _, _ := stockholmTestBot(t, issuer)
+	rows, err := b.getServerButtons(42)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got[1][0].Text != "🇸🇪 Sweden, Stockholm (subscription)" {
-		t.Fatal("Stockholm subscription button must use the English location label")
+	if len(rows) != 3 || rows[0][0].Text != "🌐 Подписка Otvali — все маршруты" || rows[0][0].CallbackData != CallbackStockholmSubscription || rows[1][0].CallbackData != CallbackIndividualKeys || rows[2][0].CallbackData != CallbackHelpBack {
+		t.Fatal("access must contain one subscription, individual keys and back")
 	}
-	if got[2][0].Text != "🇷🇺 Moscow routes (subscription)" || len(issuer.eligibleIDs) != 1 {
-		t.Fatal("Moscow must share the same subscription and eligibility check")
-	}
-	if len(legacy) != 2 || legacy[1][0].CallbackData != CallbackHelpBack {
-		t.Fatal("legacy navigation was mutated")
-	}
-	issuer.eligible = false
-	if got := b.appendStockholmButton(context.Background(), 42, legacy); len(got) != 2 {
-		t.Fatal("unauthorized actor saw Stockholm")
+	for _, row := range rows {
+		if len(row) != 1 {
+			t.Fatal("simple one-action rows expected")
+		}
 	}
 	if len(issuer.issueIDs) != 0 {
 		t.Fatal("menu must never issue credentials")
 	}
+	issuer.eligible = false
+	rows, _ = b.getServerButtons(42)
+	if len(rows) != 2 || rows[0][0].CallbackData != CallbackIndividualKeys {
+		t.Fatal("subscription must remain eligibility gated")
+	}
+	b.stockholm = nil
+	rows, _ = b.getServerButtons(42)
+	if len(rows) != 2 {
+		t.Fatal("legacy access must remain without the managed issuer")
+	}
 }
 
 func TestStockholmRejectsUnapprovedAndForgedCallbacks(t *testing.T) {
-	for _, name := range []string{"disabled", "unapproved", "group", "other_actor", "missing_message", "wrong_callback"} {
-		t.Run(name, func(t *testing.T) {
-			issuer := &fakeStockholmIssuer{eligible: true}
-			b, caller, _ := stockholmTestBot(t, issuer)
-			update := stockholmUpdate()
-			expectedCalls := 1
-			switch name {
-			case "disabled":
-				b.stockholm = nil
-				expectedCalls = 2
-			case "unapproved":
-				issuer.eligible = false
-				expectedCalls = 2
-			case "group":
-				update.CallbackQuery.Message = &telego.Message{MessageID: 17, Chat: telego.Chat{ID: -42, Type: "group"}}
-			case "other_actor":
-				update.CallbackQuery.From.ID = 7
-			case "missing_message":
-				update.CallbackQuery.Message = nil
-			case "wrong_callback":
-				update.CallbackQuery.Data = "getkey_8"
-			}
-			b.handleStockholmSubscription(b.bot, update)
-			if len(caller.calls) != expectedCalls || caller.calls[0].method != "answerCallbackQuery" {
-				t.Fatalf("callback not safely acknowledged: %+v", caller.calls)
-			}
-			if len(issuer.issueIDs) != 0 {
-				t.Fatal("unauthorized callback issued a subscription")
-			}
-			if name != "unapproved" && len(issuer.eligibleIDs) != 0 {
-				t.Fatal("forged/disabled callback reached authorization backend")
-			}
-		})
-	}
-}
-
-func TestStockholmSubscriptionUsesActorIDAndPrivateDelivery(t *testing.T) {
-	url := "https://subscriptions.example/api/sub/private-bearer?x=1&y=2"
-	issuer := &fakeStockholmIssuer{eligible: true, subscription: remnawave.Subscription{URL: url, ExpiresAt: time.Date(2030, 1, 2, 12, 0, 0, 0, time.UTC)}}
-	b, caller, logs := stockholmTestBot(t, issuer)
-	b.handleStockholmSubscription(b.bot, stockholmUpdate())
-	if len(issuer.eligibleIDs) != 1 || issuer.eligibleIDs[0] != 42 || len(issuer.issueIDs) != 1 || issuer.issueIDs[0] != 42 || !issuer.hasDeadline {
-		t.Fatal("issuer did not receive the bounded authenticated actor request")
-	}
-	if len(caller.calls) != 2 || caller.calls[0].method != "answerCallbackQuery" || caller.calls[1].method != "editMessageText" {
-		t.Fatalf("unexpected Telegram delivery: %+v", caller.calls)
-	}
-	var text, mode string
-	var chatID int64
-	json.Unmarshal(caller.calls[1].body["text"], &text)
-	json.Unmarshal(caller.calls[1].body["parse_mode"], &mode)
-	json.Unmarshal(caller.calls[1].body["chat_id"], &chatID)
-	if chatID != 42 || mode != telego.ModeHTML || !strings.Contains(text, "x=1&amp;y=2") || !strings.Contains(text, "subscription") || !strings.Contains(text, "02 Jan 2030, 15:00 MSK") || strings.Contains(text, "Hiddify") {
-		t.Fatalf("unsafe/incomplete subscription rendering: %q", text)
-	}
-	for _, expected := range []string{"Otvali VPN subscription", "Moscow → Stockholm", "Moscow → Finland", "Russian traffic directly from Moscow"} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("shared subscription instructions missing %q", expected)
-		}
-	}
-	var keyboard telego.InlineKeyboardMarkup
-	if err := json.Unmarshal(caller.calls[1].body["reply_markup"], &keyboard); err != nil {
-		t.Fatal(err)
-	}
-	if len(keyboard.InlineKeyboard) != 4 || keyboard.InlineKeyboard[0][0].URL != url || keyboard.InlineKeyboard[1][0].CallbackData != CallbackStockholmGuide || keyboard.InlineKeyboard[2][0].CallbackData != CallbackStockholmRouting || !strings.Contains(string(caller.calls[1].body["link_preview_options"]), `"is_disabled":true`) {
-		t.Fatal("subscription button or disabled link preview missing")
-	}
-	if strings.Contains(logs.String(), "private-bearer") {
-		t.Fatal("subscription URL leaked to logs")
-	}
-}
-
-func TestStockholmGuideAcknowledgesPrivateActorWithoutIssuingCredentials(t *testing.T) {
-	issuer := &fakeStockholmIssuer{eligible: true, subscription: remnawave.Subscription{URL: "https://subscriptions.example/api/sub/private-bearer"}}
-	b, caller, logs := stockholmTestBot(t, issuer)
-	update := stockholmUpdate()
-	update.CallbackQuery.Data = CallbackStockholmGuide
-	b.handleStockholmGuide(b.bot, update)
-	if len(caller.calls) != 2 || caller.calls[0].method != "answerCallbackQuery" || caller.calls[1].method != "editMessageText" {
-		t.Fatal("guide must acknowledge the callback and privately render instructions")
-	}
-	if len(issuer.eligibleIDs) != 1 || issuer.eligibleIDs[0] != 42 || len(issuer.issueIDs) != 0 {
-		t.Fatal("guide must authorize the actor without issuing credentials")
-	}
-	var text string
-	var chatID int64
-	json.Unmarshal(caller.calls[1].body["text"], &text)
-	json.Unmarshal(caller.calls[1].body["chat_id"], &chatID)
-	for _, platform := range []string{"iOS", "Android", "Windows", "macOS", "Linux", "Finland"} {
-		if !strings.Contains(text, platform) {
-			t.Fatalf("guide is missing %s guidance", platform)
-		}
-	}
-	if chatID != 42 || strings.Contains(text+logs.String(), "private-bearer") || strings.Contains(text, "Hiddify") {
-		t.Fatal("guide must be private, contain no subscription credential and use supported client instructions")
-	}
-	if !strings.Contains(text, "This Otvali subscription supplies standard VLESS/base64") || strings.Contains(text, "ask the administrator for a compatible format") {
-		t.Fatal("guide must describe the verified ordinary subscription format")
-	}
-	var keyboard telego.InlineKeyboardMarkup
-	if err := json.Unmarshal(caller.calls[1].body["reply_markup"], &keyboard); err != nil {
-		t.Fatal(err)
-	}
-	foundSubscription := false
-	for _, row := range keyboard.InlineKeyboard {
-		for _, button := range row {
-			foundSubscription = foundSubscription || button.CallbackData == CallbackStockholmSubscription
-		}
-	}
-	if !foundSubscription {
-		t.Fatal("guide must provide an explicit route back to the subscription")
-	}
-}
-
-func TestStockholmSubscriptionShowsActualUnlimitedPolicy(t *testing.T) {
-	for _, limit := range []int64{0, 1234567} {
-		issuer := &fakeStockholmIssuer{eligible: true, subscription: remnawave.Subscription{
-			URL: "https://subscriptions.example/api/sub/private-bearer", TrafficLimitBytes: limit,
-		}}
-		b, caller, _ := stockholmTestBot(t, issuer)
-		b.handleStockholmSubscription(b.bot, stockholmUpdate())
-		var text string
-		json.Unmarshal(caller.calls[1].body["text"], &text)
-		if !strings.Contains(text, "No automatic expiry") || strings.Contains(text, "2099") || strings.Contains(text, "Expires:") {
-			t.Fatal("no-expiry policy must have a human-readable label")
-		}
-		if strings.Contains(text, "Unlimited traffic") != (limit == 0) {
-			t.Fatal("unlimited traffic must reflect the provider's actual quota")
-		}
-		if limit == 0 && !strings.Contains(text, "Unlimited traffic • No automatic expiry") {
-			t.Fatal("unlimited policy label missing")
-		}
-	}
-}
-
-func TestStockholmRoutingProfilesAreOptInAndUseVerifiedRules(t *testing.T) {
-	for _, tc := range []struct {
-		name, callback, scheme string
-		handler                func(*Bot, *telego.Bot, telego.Update)
-	}{
-		{"overview", CallbackStockholmRouting, "", (*Bot).handleStockholmRoutingGuide},
-		{"Happ", CallbackStockholmHappRouting, "happ", (*Bot).handleStockholmHappRouting},
-		{"INCY", CallbackStockholmIncyRouting, "incy", (*Bot).handleStockholmIncyRouting},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			issuer := &fakeStockholmIssuer{eligible: true, subscription: remnawave.Subscription{URL: "https://subscriptions.example/api/sub/private-bearer"}}
-			b, caller, logs := stockholmTestBot(t, issuer)
-			update := stockholmUpdate()
-			update.CallbackQuery.Data = tc.callback
-			tc.handler(b, b.bot, update)
-			if len(caller.calls) != 2 || caller.calls[0].method != "answerCallbackQuery" || caller.calls[1].method != "editMessageText" || len(issuer.issueIDs) != 0 {
-				t.Fatal("routing guide must acknowledge and display instructions without issuing credentials")
-			}
-			if len(issuer.eligibleIDs) != 1 || issuer.eligibleIDs[0] != 42 {
-				t.Fatal("routing guide did not recheck the actor")
-			}
-			var text string
-			json.Unmarshal(caller.calls[1].body["text"], &text)
-			if len(text) > 4096 || strings.Contains(text+logs.String(), "private-bearer") {
-				t.Fatal("guide is too long or contains a subscription credential")
-			}
-			if !strings.Contains(text, "direct foreign server") || !strings.Contains(text, "Proxy exception") || !strings.Contains(text, "IP-check pages") || !strings.Contains(text, "foreign exit IP") || !strings.Contains(text, "ISP IP") {
-				t.Fatal("routing guide must explain foreign-IP exceptions and verify both egress paths")
-			}
-			if !strings.Contains(text, "category-ru") || !strings.Contains(text, "do not rely on the RU bypass") {
-				t.Fatal("routing guide must explain required geo data and its failure limit")
-			}
-			if tc.scheme == "" {
-				if !strings.Contains(text, "ISP IP") || !strings.Contains(text, "Moscow") {
-					t.Fatal("guide must distinguish client-direct and server-direct routing")
-				}
-				return
-			}
-			start := strings.Index(text, "<code>")
-			end := strings.Index(text, "</code>")
-			if start < 0 || end <= start {
-				t.Fatal("copyable routing profile missing")
-			}
-			link := html.UnescapeString(text[start+len("<code>") : end])
-			prefix := tc.scheme + "://routing/add/"
-			if !strings.HasPrefix(link, prefix) || strings.Contains(link, "/onadd/") {
-				t.Fatal("routing import must use the non-forcing add contract")
-			}
-			data, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, prefix))
-			if err != nil {
-				t.Fatal(err)
-			}
-			var profile struct {
-				GlobalProxy                                                     string
-				DirectSites, DirectIp, ProxySites, ProxyIp, BlockSites, BlockIp []string
-				DomainStrategy, FakeDNS                                         string
-			}
-			if err := json.Unmarshal(data, &profile); err != nil {
-				t.Fatal(err)
-			}
-			if profile.GlobalProxy != "true" || profile.DomainStrategy != "IPOnDemand" || profile.FakeDNS != "false" || len(profile.ProxySites)+len(profile.ProxyIp)+len(profile.BlockSites)+len(profile.BlockIp) != 0 {
-				t.Fatal("routing defaults must keep unmatched traffic on VPN and avoid extra overrides")
-			}
-			if !strings.Contains(string(data), `"geosite:category-ru"`) || strings.Contains(string(data), `"geosite:ru"`) || !strings.Contains(string(data), `"geoip:ru"`) || !strings.Contains(string(data), `"192.168.0.0/16"`) {
-				t.Fatal("routing profile needs valid RU categories and private-network bypass")
-			}
-			var raw map[string]json.RawMessage
-			json.Unmarshal(data, &raw)
-			if _, exists := raw["RemoteDNSIP"]; exists {
-				t.Fatal("routing guide must leave DNS resolvers at app defaults")
-			}
-			var keyboard telego.InlineKeyboardMarkup
-			json.Unmarshal(caller.calls[1].body["reply_markup"], &keyboard)
-			for _, row := range keyboard.InlineKeyboard {
-				for _, button := range row {
-					if strings.HasPrefix(button.URL, tc.scheme+":") {
-						t.Fatal("routing import must be an explicit copy action, not a Telegram URL button")
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestStockholmRoutingGuidesRejectForgedAndRemovedAccess(t *testing.T) {
-	for _, tc := range []struct {
-		callback string
-		handler  func(*Bot, *telego.Bot, telego.Update)
-	}{
-		{CallbackStockholmRouting, (*Bot).handleStockholmRoutingGuide},
-		{CallbackStockholmHappRouting, (*Bot).handleStockholmHappRouting},
-		{CallbackStockholmIncyRouting, (*Bot).handleStockholmIncyRouting},
-	} {
-		for _, forged := range []bool{false, true} {
-			issuer := &fakeStockholmIssuer{eligible: false}
-			b, caller, _ := stockholmTestBot(t, issuer)
-			update := stockholmUpdate()
-			update.CallbackQuery.Data = tc.callback
-			if forged {
-				update.CallbackQuery.From.ID = 7
-			}
-			tc.handler(b, b.bot, update)
-			if len(caller.calls) == 0 || caller.calls[0].method != "answerCallbackQuery" || len(issuer.issueIDs) != 0 {
-				t.Fatal("routing request must be acknowledged without issuance")
-			}
-			if forged && (len(caller.calls) != 1 || len(issuer.eligibleIDs) != 0) {
-				t.Fatal("forged request reached private guide/backend")
-			}
-			if !forged && len(caller.calls) != 2 {
-				t.Fatal("removed access must show generic unavailability")
-			}
-		}
-	}
-}
-
-func TestStockholmGuideRejectsDisabledUnapprovedAndForgedCallbacks(t *testing.T) {
 	for _, name := range []string{"disabled", "unapproved", "group", "other_actor", "missing_message", "wrong_callback", "ack_error"} {
 		t.Run(name, func(t *testing.T) {
 			issuer := &fakeStockholmIssuer{eligible: true}
 			b, caller, _ := stockholmTestBot(t, issuer)
 			update := stockholmUpdate()
-			update.CallbackQuery.Data = CallbackStockholmGuide
-			expectedCalls := 1
+			expected := 1
 			switch name {
 			case "disabled":
 				b.stockholm = nil
-				expectedCalls = 2
+				expected = 2
 			case "unapproved":
 				issuer.eligible = false
-				expectedCalls = 2
+				expected = 2
 			case "group":
-				update.CallbackQuery.Message = &telego.Message{MessageID: 17, Chat: telego.Chat{ID: -42, Type: "group"}}
+				update.CallbackQuery.Message = &telego.Message{Chat: telego.Chat{ID: -42, Type: "group"}}
 			case "other_actor":
 				update.CallbackQuery.From.ID = 7
 			case "missing_message":
 				update.CallbackQuery.Message = nil
 			case "wrong_callback":
-				update.CallbackQuery.Data = CallbackStockholmSubscription
+				update.CallbackQuery.Data = "getkey_1"
 			case "ack_error":
 				caller.failMethod = "answerCallbackQuery"
 			}
-			b.handleStockholmGuide(b.bot, update)
-			if len(caller.calls) != expectedCalls || caller.calls[0].method != "answerCallbackQuery" || len(issuer.issueIDs) != 0 {
-				t.Fatal("rejected guide request must only acknowledge or display unavailability")
+			b.handleStockholmSubscription(b.bot, update)
+			if len(caller.calls) != expected || caller.calls[0].method != "answerCallbackQuery" || len(issuer.issueIDs) != 0 {
+				t.Fatal("invalid callback must acknowledge and never issue")
 			}
 			if name != "unapproved" && len(issuer.eligibleIDs) != 0 {
-				t.Fatal("forged or disabled request reached the authorization backend")
+				t.Fatal("forged callback reached backend")
 			}
 		})
+	}
+}
+
+func TestSubscriptionIsOnePrivateConciseMessage(t *testing.T) {
+	const privateURL = "https://subscriptions.example/api/sub/private-bearer?x=1&y=2"
+	issuer := &fakeStockholmIssuer{eligible: true, subscription: remnawave.Subscription{URL: privateURL, ExpiresAt: time.Date(2030, 1, 2, 12, 0, 0, 0, time.UTC)}}
+	b, caller, logs := stockholmTestBot(t, issuer)
+	b.handleStockholmSubscription(b.bot, stockholmUpdate())
+	if len(issuer.issueIDs) != 1 || issuer.issueIDs[0] != 42 || !issuer.hasDeadline || len(caller.calls) != 2 || caller.calls[0].method != "answerCallbackQuery" || caller.calls[1].method != "editMessageText" {
+		t.Fatal("bounded actor request must deliver once in place")
+	}
+	text := callText(t, caller.calls[1])
+	if !strings.Contains(text, "x=1&amp;y=2") || !strings.Contains(text, "02.01.2030 15:00") || !strings.Contains(text, "/help_setup") || strings.Contains(text, "2099") {
+		t.Fatal("escaped URL, date or setup shortcut missing")
+	}
+	var chatID int64
+	json.Unmarshal(caller.calls[1].body["chat_id"], &chatID)
+	var mode string
+	json.Unmarshal(caller.calls[1].body["parse_mode"], &mode)
+	if chatID != 42 || mode != telego.ModeHTML || len([]rune(text)) > 650 {
+		t.Fatal("private concise HTML response required")
+	}
+	got := callbacks(callKeyboard(t, caller.calls[1]))
+	if len(got) != 2 || got[0] != CallbackHelpVPNSetup || got[1] != CallbackGetKey {
+		t.Fatal("delivery must link only setup and access")
+	}
+	if strings.Contains(logs.String(), "private-bearer") || !strings.Contains(string(caller.calls[1].body["link_preview_options"]), `"is_disabled":true`) {
+		t.Fatal("credential logging or preview leak")
+	}
+}
+
+func TestSubscriptionShowsActualUnlimitedPolicy(t *testing.T) {
+	for _, limit := range []int64{0, 1234567} {
+		issuer := &fakeStockholmIssuer{eligible: true, subscription: remnawave.Subscription{URL: "https://subscriptions.example/api/sub/private-bearer", TrafficLimitBytes: limit}}
+		b, caller, _ := stockholmTestBot(t, issuer)
+		b.handleStockholmSubscription(b.bot, stockholmUpdate())
+		text := callText(t, caller.calls[1])
+		if !strings.Contains(text, "Без автоматического окончания") || strings.Contains(text, "2099") || strings.Contains(text, "Действует до") || strings.Contains(text, "Безлимитный трафик") != (limit == 0) {
+			t.Fatal("display must reflect actual provider policy")
+		}
 	}
 }
 
@@ -438,7 +253,7 @@ func TestStockholmFailuresDoNotExposeSecretsOrTouchLegacy(t *testing.T) {
 			}
 			for _, call := range caller.calls {
 				if call.method != "answerCallbackQuery" && call.method != "editMessageText" {
-					t.Fatal("failure triggered an unexpected Telegram side effect")
+					t.Fatal("unexpected external side effect")
 				}
 			}
 		})

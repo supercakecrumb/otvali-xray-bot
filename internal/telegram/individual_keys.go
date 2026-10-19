@@ -1,0 +1,118 @@
+package telegram
+
+import (
+	"context"
+	"html"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/mymmrac/telego"
+	tu "github.com/mymmrac/telego/telegoutil"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
+)
+
+type individualKeyIssuer interface {
+	Keys(context.Context, int64) ([]remnawave.ServerKey, error)
+}
+
+var managedKeyID = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+func (b *Bot) individualKeysKeyboard(servers []database.Server, keys []remnawave.ServerKey) *telego.InlineKeyboardMarkup {
+	rows := b.buildServerButtons(servers)
+	rows = rows[:len(rows)-1]
+	seen := make(map[string]bool)
+	for _, key := range keys {
+		if !managedKeyID.MatchString(key.ID) || !validServerKey(key.URL) || seen[key.ID] {
+			continue
+		}
+		seen[key.ID] = true
+		name := []rune(key.Name)
+		if len(name) > 80 {
+			name = name[:80]
+		}
+		if len(name) == 0 {
+			continue
+		}
+		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton(string(name)).WithCallbackData(CallbackManagedKeyPrefix+key.ID)))
+	}
+	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Получить VPN").WithCallbackData(CallbackGetKey)))
+	return tu.InlineKeyboard(rows...)
+}
+
+func (b *Bot) handleIndividualKeys(bot *telego.Bot, update telego.Update) {
+	if !b.acknowledgePrivateCallback(bot, update) || update.CallbackQuery.Data != CallbackIndividualKeys {
+		return
+	}
+	var servers []database.Server
+	text := "<b>Отдельные ключи</b>\n\nВыберите сервер. Ключ добавляется в Happ или INCY как сервер, а не как подписка."
+	if b.db != nil {
+		var err error
+		servers, err = b.db.GetAllServers()
+		if err != nil {
+			b.logger.Warn("Legacy server list unavailable")
+			text += "\n\nСписок старых серверов временно недоступен."
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	var keys []remnawave.ServerKey
+	issuer, ok := b.stockholm.(individualKeyIssuer)
+	if ok && b.stockholm.Eligible(ctx, update.CallbackQuery.From.ID) {
+		var err error
+		keys, err = issuer.Keys(ctx, update.CallbackQuery.From.ID)
+		if err != nil {
+			b.logger.Warn("Individual VPN key list unavailable")
+			text += "\n\nНовые ключи временно недоступны. Попробуйте позже."
+		}
+	}
+	b.editStockholmMessage(bot, update, text, b.individualKeysKeyboard(servers, keys))
+}
+
+func (b *Bot) handleManagedKey(bot *telego.Bot, update telego.Update) {
+	if !b.acknowledgePrivateCallback(bot, update) {
+		return
+	}
+	callback := update.CallbackQuery
+	if !strings.HasPrefix(callback.Data, CallbackManagedKeyPrefix) {
+		return
+	}
+	id := strings.TrimPrefix(callback.Data, CallbackManagedKeyPrefix)
+	if !managedKeyID.MatchString(id) {
+		b.managedKeyUnavailable(bot, update)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	issuer, ok := b.stockholm.(individualKeyIssuer)
+	if !ok || !b.stockholm.Eligible(ctx, callback.From.ID) {
+		b.managedKeyUnavailable(bot, update)
+		return
+	}
+	keys, err := issuer.Keys(ctx, callback.From.ID)
+	if err != nil {
+		b.logger.Warn("Individual VPN key request failed")
+		b.managedKeyUnavailable(bot, update)
+		return
+	}
+	for _, key := range keys {
+		if key.ID != id || !validServerKey(key.URL) {
+			continue
+		}
+		text := "<b>" + html.EscapeString(key.Name) + "</b>\n\n<code>" + html.EscapeString(key.URL) + "</code>\n\nДобавьте полный vless:// ключ в Happ или INCY как сервер.\nУстановка: /help_setup. Ключ никому не передавайте."
+		b.editStockholmMessage(bot, update, text, backHomeKeyboard)
+		return
+	}
+	b.managedKeyUnavailable(bot, update)
+}
+
+func (b *Bot) managedKeyUnavailable(bot *telego.Bot, update telego.Update) {
+	b.editStockholmMessage(bot, update, "Ключ сейчас недоступен. Откройте список заново или напишите администратору.", tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Отдельные ключи").WithCallbackData(CallbackIndividualKeys))))
+}
+
+func validServerKey(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && len(raw) <= 3000 && u.Scheme == "vless" && u.User != nil && u.Hostname() != "" && u.Port() != "" && !strings.ContainsAny(raw, "\r\n\x00")
+}

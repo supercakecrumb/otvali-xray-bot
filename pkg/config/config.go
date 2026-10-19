@@ -12,6 +12,7 @@ type Config struct {
 	LogLevel      string
 	DatabaseURL   string
 	SSHKeyPath    string
+	VPNHelpURL    string
 	ServerPolicy  serverpolicy.Policy
 	Stockholm     remnawave.Config
 }
@@ -30,6 +31,7 @@ func LoadConfig() (Config, error) {
 		LogLevel:      os.Getenv("LOG_LEVEL"),
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		SSHKeyPath:    os.Getenv("SSH_KEY_PATH"),
+		VPNHelpURL:    os.Getenv("VPN_HELP_URL"),
 		ServerPolicy:  policy,
 		Stockholm:     stockholm,
 	}, nil

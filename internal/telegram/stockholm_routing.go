@@ -13,47 +13,38 @@ import (
 // DNS resolvers/geofile locations are omitted so the apps use their defaults.
 const clientRoutingProfileJSON = `{"Name":"Otvali RU direct, other VPN","GlobalProxy":"true","DirectSites":["geosite:private","geosite:category-ru"],"DirectIp":["geoip:ru","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","127.0.0.0/8","224.0.0.0/4","255.255.255.255","::1/128","fc00::/7","fe80::/10"],"ProxySites":[],"ProxyIp":[],"BlockSites":[],"BlockIp":[],"DomainStrategy":"IPOnDemand","FakeDNS":"false"}`
 
-const clientRoutingGuideText = "<b>Client routing: RU direct, other traffic VPN</b>\n\n" +
-	"This optional Happ / INCY profile sends Russian domain categories, Russian IPs and local/private addresses directly. Traffic that does not match goes through your selected VPN server.\n\n" +
-	"<b>Direct on your device</b> uses your regular Internet connection and ISP IP. <b>Direct on a Moscow server</b> uses the Moscow server’s IP for Russian traffic that reaches it. These are separate routing decisions.\n\n" +
-	"Choose your app below, then copy and import its routing link only if you want these rules. Reading this guide does not activate them. Importing can activate the profile after its geo files are ready. Select the imported profile, enable its routing for the subscription, and reconnect to apply changes.\n\n" +
-	"<b>Your own rules:</b> add a domain or IP/CIDR to Direct to bypass the VPN, or Proxy to use the selected VPN. Avoid conflicting entries in both lists. Keep unmatched traffic set to Proxy/VPN. For a Russian site that needs a foreign IP, choose a direct foreign server and add a Proxy exception. A Proxy exception on a Moscow profile still follows that server’s RU-direct policy.\n\n" +
-	"<b>Verify the route:</b> refresh the app’s geo data; it needs the category-ru domain category and ru IP category. If those categories are missing or geo data fails to load, do not rely on the RU bypass. Reconnect, then use IP-check pages covered by each rule: proxied foreign traffic should report the intended foreign exit IP; client-direct RU traffic should report your ISP IP. RU traffic sent to a Moscow server can report its Moscow IP. Categories are not a guarantee for every site.\n\n" +
-	"This Otvali subscription uses standard VLESS/base64 for Happ and INCY. Other providers’ Happ JSON subscriptions can prevent manual routing imports or edits. Keep your existing Finland profile for connection fallback."
+const clientRoutingGuideText = "<b>Маршрутизация</b>\n\nРоссийские сайты — напрямую, остальной трафик — через VPN. Это необязательные правила для Happ / INCY.\n\nНа устройстве «напрямую» означает ваш обычный IP; на маршруте через Москву — московский IP. Для российского сайта с иностранным IP выберите прямой зарубежный сервер и исключение Proxy.\n\nВыберите приложение для импорта правил. Подробности и проверка IP — на сайте."
+
+func (b *Bot) routingWebsiteRow() [][]telego.InlineKeyboardButton {
+	if website := b.guideURL("routing"); website != "" {
+		return [][]telego.InlineKeyboardButton{tu.InlineKeyboardRow(tu.InlineKeyboardButton("📖 Подробнее на сайте").WithURL(website))}
+	}
+	return nil
+}
 
 func (b *Bot) handleStockholmRoutingGuide(bot *telego.Bot, update telego.Update) {
-	keyboard := tu.InlineKeyboard(
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Happ routing profile").WithCallbackData(CallbackStockholmHappRouting)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("INCY routing profile").WithCallbackData(CallbackStockholmIncyRouting)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("📖 Setup guide").WithCallbackData(CallbackStockholmGuide)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Get my subscription").WithCallbackData(CallbackStockholmSubscription)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Choose server").WithCallbackData(CallbackGetKey)),
-	)
-	b.showStockholmGuide(bot, update, CallbackStockholmRouting, clientRoutingGuideText, keyboard)
+	rows := [][]telego.InlineKeyboardButton{
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Правила для Happ").WithCallbackData(CallbackStockholmHappRouting)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Правила для INCY").WithCallbackData(CallbackStockholmIncyRouting)),
+	}
+	rows = append(rows, b.routingWebsiteRow()...)
+	rows = append(rows, helpVpnBackKeyboard.InlineKeyboard...)
+	b.showStockholmGuide(bot, update, CallbackStockholmRouting, clientRoutingGuideText, tu.InlineKeyboard(rows...))
 }
 
 func (b *Bot) handleStockholmHappRouting(bot *telego.Bot, update telego.Update) {
-	b.showClientRoutingProfile(bot, update, "Happ", "happ", CallbackStockholmHappRouting, "https://www.happ.su/main/dev-docs/routing")
+	b.showClientRoutingProfile(bot, update, "Happ", "happ", CallbackStockholmHappRouting)
 }
 
 func (b *Bot) handleStockholmIncyRouting(bot *telego.Bot, update telego.Update) {
-	b.showClientRoutingProfile(bot, update, "INCY", "incy", CallbackStockholmIncyRouting, "https://docs.incy.cc/en/routing/")
+	b.showClientRoutingProfile(bot, update, "INCY", "incy", CallbackStockholmIncyRouting)
 }
 
-func (b *Bot) showClientRoutingProfile(bot *telego.Bot, update telego.Update, appName, scheme, callback, docsURL string) {
-	// This public configuration contains no subscription, account or server keys.
+func (b *Bot) showClientRoutingProfile(bot *telego.Bot, update telego.Update, appName, scheme, callback string) {
+	// This opt-in configuration is public and contains no account credentials.
 	link := scheme + "://routing/add/" + base64.StdEncoding.EncodeToString([]byte(clientRoutingProfileJSON))
-	text := "<b>" + appName + ": RU direct, other traffic VPN</b>\n\n" +
-		"Copy the routing link below and import it through your app’s routing-profile clipboard/import option. Select the subscription to which it should apply. Importing can activate it once geo files are ready. Select the imported profile, enable its routing, and reconnect. A profile with the same name may be updated.\n\n" +
-		"<code>" + html.EscapeString(link) + "</code>\n\n" +
-		"Russian domains/IPs and private networks go Direct; unmatched traffic goes through the VPN. Refresh the app’s geo files and check that category-ru domains and ru IPs are available. If geo data is missing or fails to load, do not rely on the RU bypass. DNS resolver settings use app defaults; this profile turns FakeDNS off.\n\n" +
-		"For your own exceptions, edit Direct / Proxy domains or IP/CIDR lists, avoid conflicting rules, and reconnect after saving. For a Russian site that needs a foreign IP, choose a direct foreign server and add a Proxy exception. Moscow profiles still apply their server-side RU-direct policy. Other providers’ JSON subscriptions may lock Happ routing; this Otvali subscription uses standard VLESS/base64.\n\n" +
-		"Verify with IP-check pages covered by each rule: proxied foreign traffic should show the intended foreign exit IP, and client-direct RU traffic your ISP IP. This routing link is not your private subscription URL; keep the subscription URL to yourself."
-	keyboard := tu.InlineKeyboard(
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton(appName+": official routing docs").WithURL(docsURL)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Routing guide").WithCallbackData(CallbackStockholmRouting)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Get my subscription").WithCallbackData(CallbackStockholmSubscription)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Choose server").WithCallbackData(CallbackGetKey)),
-	)
-	b.showStockholmGuide(bot, update, callback, text, keyboard)
+	text := "<b>Правила для " + appName + "</b>\n\nСкопируйте ссылку и импортируйте её как профиль маршрутизации:\n\n<code>" + html.EscapeString(link) + "</code>\n\nИмпорт может включить правила после загрузки геоданных. Выберите профиль и переподключитесь. Обновите геоданные: нужны category-ru и geoip:ru. Если загрузка не удалась, не полагайтесь на обход российских сайтов."
+	rows := b.routingWebsiteRow()
+	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Маршрутизация").WithCallbackData(CallbackStockholmRouting)), helpVpnBackKeyboard.InlineKeyboard[0])
+	b.showStockholmGuide(bot, update, callback, text, tu.InlineKeyboard(rows...))
 }

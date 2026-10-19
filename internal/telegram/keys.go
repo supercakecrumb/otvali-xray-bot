@@ -14,10 +14,10 @@ import (
 
 var backHomeKeyboard = tu.InlineKeyboard(
 	tu.InlineKeyboardRow(
-		tu.InlineKeyboardButton("📖 Server setup instructions").WithCallbackData(CallbackHelpVPNSetup),
+		tu.InlineKeyboardButton("⚙️ Установка VPN").WithCallbackData(CallbackHelpVPNSetup),
 	),
 	tu.InlineKeyboardRow(
-		tu.InlineKeyboardButton("🏠 Home").WithCallbackData(CallbackHelpBack),
+		tu.InlineKeyboardButton("⬅️ Отдельные ключи").WithCallbackData(CallbackIndividualKeys),
 	),
 )
 
@@ -46,7 +46,7 @@ func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 
 	msg := tu.Message(
 		tu.ID(chatID),
-		"Выберите сервер для получения ключа:",
+		accessText,
 	).WithReplyMarkup(keyboard)
 
 	_, err = bot.SendMessage(msg)
@@ -56,19 +56,11 @@ func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 	}
 }
 
-// Fetch server buttons with online and total user counts
+// The access screen is independent of legacy panel availability.
 func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, error) {
-	// Fetch servers from the database
-	servers, err := b.db.GetAllServers()
-	if err != nil {
-		b.logger.Error("Failed to fetch servers", slog.String("error", err.Error()))
-		msg := tu.Message(tu.ID(chatID), "Не удалось получить список серверов.")
-		_, _ = b.bot.SendMessage(msg)
-		return nil, fmt.Errorf("failed to fetch servers: %w", err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	return b.appendStockholmButton(ctx, chatID, b.buildServerButtons(servers)), nil
+	return b.accessButtons(ctx, chatID), nil
 }
 
 func (b *Bot) buildServerButtons(servers []database.Server) [][]telego.InlineKeyboardButton {
@@ -104,6 +96,9 @@ func (b *Bot) buildServerButtons(servers []database.Server) [][]telego.InlineKey
 // Handle callback queries from /get_key command
 func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	callbackQuery := update.CallbackQuery
+	if callbackQuery == nil || callbackQuery.Message == nil {
+		return
+	}
 	data := callbackQuery.Data
 	chatID := callbackQuery.Message.GetChat().ID
 	msgID := callbackQuery.Message.GetMessageID()
@@ -115,7 +110,10 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 	}
 
 	// Check if callback data matches "getkey_" exactly
-	if data == "getkey_" {
+	if data == CallbackGetKey {
+		if !b.acknowledgePrivateCallback(bot, update) {
+			return
+		}
 		serverButtons, err := b.getServerButtons(chatID)
 		if err != nil {
 			b.logger.Error("Failed to get server buttons", "error", err)
@@ -133,7 +131,7 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 		editMsg := &telego.EditMessageTextParams{
 			ChatID:      tu.ID(chatID),
 			MessageID:   msgID,
-			Text:        "Выберите сервер для получения ключа:",
+			Text:        accessText,
 			ReplyMarkup: keyboard,
 		}
 
@@ -244,7 +242,7 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	keyText := legacyKeyCaption(serverName, key)
 	keyMsg.Text = keyText
 	keyMsg.ParseMode = telego.ModeMarkdownV2
-	keyMsg.ReplyMarkup = b.withSubscriptionGuides(update, backHomeKeyboard)
+	keyMsg.ReplyMarkup = backHomeKeyboard
 
 	// Notify admins about successful key generation
 	b.NotifyAdminsOfKeyRequest(username, chatID, serverName, true, "")
@@ -259,8 +257,8 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 }
 
 func legacyKeyCaption(serverName, key string) string {
-	return "Your server key for " + escapeMarkdownV2(serverName) + ":\n\n```" + key + "```\n\n" +
-		escapeMarkdownV2("Copy this complete vless:// key into Happ or INCY as a server from the clipboard. This is a single-server key, not a subscription URL. Keep your existing Finland profile as a fallback. Open the server setup instructions below or /help for official downloads and import guidance. Keep this key private.")
+	return "Ключ для " + escapeMarkdownV2(serverName) + ":\n\n```" + key + "```\n\n" +
+		escapeMarkdownV2("Добавьте полный vless:// ключ в Happ или INCY как сервер. Установка: /help_setup. Ключ никому не передавайте.")
 }
 
 func (b *Bot) sendMessageWithAnimatedDots(chatID int64, messageID int, loadingText string) (*telego.EditMessageTextParams, context.CancelFunc, error) {

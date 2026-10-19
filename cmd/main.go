@@ -34,6 +34,11 @@ func run() int {
 		slog.Error("Invalid configuration", slog.String("error", err.Error()))
 		return 1
 	}
+	guideOption, err := telegram.WithVPNHelpURL(cfg.VPNHelpURL)
+	if err != nil {
+		slog.Error("Invalid VPN help URL")
+		return 1
+	}
 
 	// Set up logger
 	log := logger.New(cfg.LogLevel)
@@ -70,7 +75,7 @@ func run() int {
 	}()
 
 	// Start the bot
-	var botOptions []telegram.Option
+	botOptions := []telegram.Option{guideOption}
 	if cfg.Stockholm.Enabled {
 		client, err := remnawave.NewClient(cfg.Stockholm)
 		if err != nil {

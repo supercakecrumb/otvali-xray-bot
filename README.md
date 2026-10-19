@@ -139,12 +139,23 @@ Then add this server to telegram bot with command `/add_server`
 
 Provision `known_hosts` in the working directory using independently verified SSH host keys before rollout. Unknown and changed host keys now fail closed. The bot accepts account and credential operations only in private chats belonging to the Telegram sender. Command arguments are redacted in notifications and logs. Rotate panel passwords previously submitted with `/add_server`, and remove old sensitive logs/messages through the approved retention workflow. The vendored go-x3ui client omits credential-bearing response bodies and inbound objects from logs.
 
-## Optional Stockholm subscriptions
+## Optional managed subscriptions
 
-The Remnawave integration adds a separate Stockholm subscription button beside
-the legacy Finland button. Finland's server records, SSH/3x-ui issuance and
-existing credentials are preserved. Never add a Remnawave node to the legacy
+The main menu keeps three actions: get VPN access, installation, and how it works.
+The access screen offers one Otvali subscription containing all managed routes,
+plus a separate keys submenu. Managed standalone keys are exported from that same
+account and subscription; choosing a key never creates an additional identity.
+The legacy Finland key remains available in the keys submenu. Finland's server
+records, SSH/3x-ui issuance and existing credentials are preserved. Never add a Remnawave node to the legacy
 `servers` table: those rows are interpreted as SSH/3x-ui servers.
+
+`/help_setup` opens the short three-step Russian installation guide without
+issuing credentials. Platform instructions and optional client routing sit under
+installation. Set optional `VPN_HELP_URL` to the public HTTPS guide URL (without
+credentials, query or fragment); platform links add `#windows`, `#macos`,
+`#android`, `#ios`, `#linux`, and routing uses `#routing`. With no URL configured,
+platform help links to the official Happ and INCY downloads. The public guide
+never receives subscription links or server keys.
 
 The feature is disabled by default. Configure the variables in `.env.example`
 through OpenBao and the private deployment environment. `REMNA_ALLOWED_TELEGRAM_IDS`
@@ -164,7 +175,7 @@ creates access with **unlimited traffic and no automatic expiry** by default
 timestamp; the bot uses `2099-01-01T00:00:00Z`, which the pinned backend
 [recognizes as no expiry](https://github.com/remnawave/backend/blob/3.4.5/src/modules/subscription/utils/get-user-info.headers.ts)
 and exposes as `expire=0`, with `trafficLimitBytes=0` for unlimited traffic.
-The bot shows “Unlimited traffic • No automatic expiry” instead of 2099.
+The bot shows “Безлимитный трафик • Без автоматического окончания” instead of 2099.
 Explicit `REMNA_ACCESS_DAYS=1..3660` retains finite-duration support.
 Repeated requests retrieve the same current subscription without extending
 expiry, converting an existing finite account to unlimited, or reactivating disabled

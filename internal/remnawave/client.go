@@ -53,16 +53,17 @@ type API interface {
 }
 
 type Client struct {
-	origin string
-	token  string
-	http   *http.Client
+	origin             string
+	subscriptionOrigin string
+	token              string
+	http               *http.Client
 }
 
 func NewClient(c Config) (*Client, error) {
 	if !c.Enabled || !validOrigin(c.BaseURL) || c.APIToken == "" {
 		return nil, ErrNotEligible
 	}
-	return &Client{origin: c.BaseURL, token: c.APIToken, http: &http.Client{
+	return &Client{origin: c.BaseURL, subscriptionOrigin: c.SubscriptionOrigin, token: c.APIToken, http: &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
