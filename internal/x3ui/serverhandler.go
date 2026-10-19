@@ -2,6 +2,8 @@ package x3ui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"sync"
@@ -9,12 +11,14 @@ import (
 
 	x3client "github.com/supercakecrumb/go-x3ui/client"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/serverpolicy"
 	"golang.org/x/crypto/ssh"
 )
 
 var (
 	defaultInboundRemark = "DefaultInbound"
 	defaultInboundPort   = 443
+	ErrServerDisabled    = errors.New("server disabled")
 )
 
 type ServerHandler struct {
@@ -28,9 +32,10 @@ type ServerHandler struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+	policy     serverpolicy.Policy
 }
 
-func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog.Logger) *ServerHandler {
+func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog.Logger, policy serverpolicy.Policy) *ServerHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	sh := ServerHandler{
 		SSHKeyPath: sshKeyPath,
@@ -41,10 +46,15 @@ func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog
 		logger:     logger,
 		ctx:        ctx,
 		cancel:     cancel,
+		policy:     policy,
 	}
 
 	for i := range servers {
 		server := servers[i]
+		if sh.IsServerDisabled(server.ID) {
+			logger.Info("Skipping disabled server", slog.Int64("server_id", server.ID))
+			continue
+		}
 		// Connect to the server and set up the x3ui client
 		_, err := sh.AddClient(&server)
 		if err != nil {
@@ -62,6 +72,10 @@ func NewServerHandler(sshKeyPath string, servers []database.Server, logger *slog
 	}
 
 	return &sh
+}
+
+func (sh *ServerHandler) IsServerDisabled(serverID int64) bool {
+	return sh.policy.IsDisabled(serverID)
 }
 
 func (sh *ServerHandler) Close() {
@@ -99,6 +113,9 @@ func (sh *ServerHandler) Close() {
 }
 
 func (sh *ServerHandler) AddClient(server *database.Server) (*x3client.Client, error) {
+	if sh.IsServerDisabled(server.ID) {
+		return nil, fmt.Errorf("%w: %d", ErrServerDisabled, server.ID)
+	}
 
 	// Check if client already exists
 	sh.mutex.RLock()
@@ -151,6 +168,9 @@ func (sh *ServerHandler) connectToServer(server *database.Server) (*x3client.Cli
 }
 
 func (sh *ServerHandler) retryConnect(server *database.Server) {
+	if sh.IsServerDisabled(server.ID) {
+		return
+	}
 	backoff := 5 * time.Second
 	maxBackoff := 2 * time.Minute
 

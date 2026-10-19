@@ -1,6 +1,20 @@
 # otvali-xray-bot
 Bot for distributing vpn
 
+## Retiring a server from the bot
+
+Set `BOT_DISABLED_SERVER_IDS` to a comma-separated list of positive server IDs
+from the bot's database, then restart the bot. An unset or empty value keeps all
+servers enabled. Invalid values stop startup before any database or server
+connection is made.
+
+Disabled servers are hidden from key-selection menus, old Telegram buttons are
+rejected with a message asking the user to choose another server, and their SSH
+connections and background reconnects are skipped. This does not delete server
+rows, change remote Xray clients, revoke installed keys, or change hosting bills.
+Use stable numeric IDs, not server names; obtain the actual production ID before
+setting this variable. Remove an ID and restart to restore its previous behavior.
+
 ## X3UI server setup before use
 
 > Instruction is made for Ubuntu 24.04

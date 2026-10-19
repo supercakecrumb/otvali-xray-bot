@@ -20,6 +20,9 @@ var localPortSearchStart = 10000
 
 // StartSSHPortForward sets up an SSH connection with port forwarding using SSH key authentication
 func (sh *ServerHandler) StartSSHPortForward(server *database.Server) (*ssh.Client, int, error) {
+	if sh.IsServerDisabled(server.ID) {
+		return nil, 0, fmt.Errorf("%w: %d", ErrServerDisabled, server.ID)
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			sh.logger.Error("Recovered from panic", slog.Any("panic", r))
@@ -252,6 +255,9 @@ func findLocalPort(start int) (int, error) {
 }
 
 func (sh *ServerHandler) monitorSSHConnections(server *database.Server) {
+	if sh.IsServerDisabled(server.ID) {
+		return
+	}
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
