@@ -16,7 +16,11 @@ import (
 
 func main() {
 	// Load configuration
-	cfg := config.LoadConfig()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		slog.Error("Invalid configuration", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 
 	// Set up logger
 	log := logger.New(cfg.LogLevel)
@@ -34,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 	// Initialize server Handler
-	serverHandler := x3ui.NewServerHandler(cfg.SSHKeyPath, servers, log)
+	serverHandler := x3ui.NewServerHandler(cfg.SSHKeyPath, servers, log, cfg.ServerPolicy)
 	if serverHandler == nil {
 		log.Error("Failed to init serverHandler")
 		os.Exit(1)

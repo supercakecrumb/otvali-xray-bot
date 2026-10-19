@@ -36,6 +36,9 @@ func (sh *ServerHandler) CreateInbound(server *database.Server) (*x3client.Inbou
 }
 
 func (sh *ServerHandler) GetUserKey(server *database.Server, email string, tgID int64) (string, error) {
+	if sh.IsServerDisabled(server.ID) {
+		return "", fmt.Errorf("%w: %d", ErrServerDisabled, server.ID)
+	}
 	// Validate connection before proceeding
 	if err := sh.validateConnection(server); err != nil {
 		sh.logger.Error("connection validation failed",

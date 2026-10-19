@@ -9,6 +9,7 @@ import (
 
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 )
 
 var backHomeKeyboard = tu.InlineKeyboard(
@@ -54,8 +55,6 @@ func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
 
 // Fetch server buttons with online and total user counts
 func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, error) {
-	// Build buttons
-	var buttons [][]telego.InlineKeyboardButton
 	// Fetch servers from the database
 	servers, err := b.db.GetAllServers()
 	if err != nil {
@@ -64,7 +63,15 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 		_, _ = b.bot.SendMessage(msg)
 		return nil, fmt.Errorf("failed to fetch servers: %w", err)
 	}
+	return b.buildServerButtons(servers), nil
+}
+
+func (b *Bot) buildServerButtons(servers []database.Server) [][]telego.InlineKeyboardButton {
+	var buttons [][]telego.InlineKeyboardButton
 	for _, server := range servers {
+		if b.sh.IsServerDisabled(server.ID) {
+			continue
+		}
 		// TODO: Parse the inbound settings to get total users
 
 		// TODO: Count online users for this inbound
@@ -86,7 +93,7 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 
 	buttons = append(buttons, backRow)
 
-	return buttons, nil
+	return buttons
 }
 
 // Handle callback queries from /get_key command
@@ -139,11 +146,41 @@ func (b *Bot) handleGetKeyCallback(bot *telego.Bot, update telego.Update) {
 		return
 	}
 
+	// Old Telegram messages retain their callbacks after a server is retired.
+	// Reject them before key generation or error notifications to administrators.
+	if b.sh.IsServerDisabled(int64(serverID)) {
+		b.rejectDisabledServer(bot, update)
+		return
+	}
+
 	// Notify admins about server selection
 	b.NotifyAdminsOfAction(username, chatID, "server_selected", fmt.Sprintf("Пользователь выбрал сервер ID: %d для получения ключа", serverID))
 
 	// Start generating the key
 	go b.generateKeyProcess(serverID, update)
+}
+
+func (b *Bot) rejectDisabledServer(bot *telego.Bot, update telego.Update) {
+	const text = "Этот сервер больше недоступен. Выберите другой сервер."
+	callback := update.CallbackQuery
+	if err := bot.AnswerCallbackQuery(&telego.AnswerCallbackQueryParams{
+		CallbackQueryID: callback.ID,
+		Text:            text,
+		ShowAlert:       true,
+	}); err != nil {
+		b.logger.Error("Failed to acknowledge disabled server selection", "error", err)
+	}
+	_, err := bot.EditMessageText(&telego.EditMessageTextParams{
+		ChatID:    tu.ID(callback.Message.GetChat().ID),
+		MessageID: callback.Message.GetMessageID(),
+		Text:      text,
+		ReplyMarkup: tu.InlineKeyboard(
+			tu.InlineKeyboardRow(tu.InlineKeyboardButton("Выбрать сервер").WithCallbackData(CallbackGetKey)),
+		),
+	})
+	if err != nil {
+		b.logger.Error("Failed to update disabled server selection", "error", err)
+	}
 }
 
 // Generate key process with animated dots and message updates
