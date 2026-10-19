@@ -245,6 +245,9 @@ func TestStockholmRoutingProfilesAreOptInAndUseVerifiedRules(t *testing.T) {
 			if len(text) > 4096 || strings.Contains(text+logs.String(), "private-bearer") {
 				t.Fatal("guide is too long or contains a subscription credential")
 			}
+			if !strings.Contains(text, "direct foreign server") || !strings.Contains(text, "Proxy exception") || !strings.Contains(text, "IP-check pages") || !strings.Contains(text, "foreign exit IP") || !strings.Contains(text, "ISP IP") {
+				t.Fatal("routing guide must explain foreign-IP exceptions and verify both egress paths")
+			}
 			if tc.scheme == "" {
 				if !strings.Contains(text, "ISP IP") || !strings.Contains(text, "Moscow") {
 					t.Fatal("guide must distinguish client-direct and server-direct routing")
@@ -273,7 +276,7 @@ func TestStockholmRoutingProfilesAreOptInAndUseVerifiedRules(t *testing.T) {
 			if err := json.Unmarshal(data, &profile); err != nil {
 				t.Fatal(err)
 			}
-			if profile.GlobalProxy != "true" || profile.DomainStrategy != "IPIfNonMatch" || profile.FakeDNS != "false" || len(profile.ProxySites)+len(profile.ProxyIp)+len(profile.BlockSites)+len(profile.BlockIp) != 0 {
+			if profile.GlobalProxy != "true" || profile.DomainStrategy != "IPOnDemand" || profile.FakeDNS != "false" || len(profile.ProxySites)+len(profile.ProxyIp)+len(profile.BlockSites)+len(profile.BlockIp) != 0 {
 				t.Fatal("routing defaults must keep unmatched traffic on VPN and avoid extra overrides")
 			}
 			if !strings.Contains(string(data), `"geosite:category-ru"`) || strings.Contains(string(data), `"geosite:ru"`) || !strings.Contains(string(data), `"geoip:ru"`) || !strings.Contains(string(data), `"192.168.0.0/16"`) {
