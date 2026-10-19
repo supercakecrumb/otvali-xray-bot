@@ -21,6 +21,7 @@ func (b *Bot) registerCommands() {
 	b.bh.Handle(b.handleHelpCallback, th.CallbackDataContains("help_"))
 
 	b.bh.Handle(b.handleGetKeyCallback, th.CallbackDataContains("getkey_"))
+	b.bh.Handle(b.handleStockholmSubscription, th.CallbackDataEqual(CallbackStockholmSubscription))
 }
 
 // Handle /start command

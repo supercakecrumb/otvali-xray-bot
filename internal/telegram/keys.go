@@ -63,7 +63,9 @@ func (b *Bot) getServerButtons(chatID int64) ([][]telego.InlineKeyboardButton, e
 		_, _ = b.bot.SendMessage(msg)
 		return nil, fmt.Errorf("failed to fetch servers: %w", err)
 	}
-	return b.buildServerButtons(servers), nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return b.appendStockholmButton(ctx, chatID, b.buildServerButtons(servers)), nil
 }
 
 func (b *Bot) buildServerButtons(servers []database.Server) [][]telego.InlineKeyboardButton {

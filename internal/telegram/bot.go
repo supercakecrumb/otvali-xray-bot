@@ -13,25 +13,47 @@ import (
 )
 
 type Bot struct {
-	bot    *telego.Bot
-	logger *slog.Logger
-	db     *database.DB
-	bh     *th.BotHandler
-	sh     *x3ui.ServerHandler
+	bot       *telego.Bot
+	logger    *slog.Logger
+	db        *database.DB
+	bh        *th.BotHandler
+	sh        *x3ui.ServerHandler
+	stockholm StockholmIssuer
 }
 
-func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x3ui.ServerHandler) (*Bot, error) {
-	bot, err := telego.NewBot(token)
+type Option func(*Bot)
+
+// Telegram errors may echo credential-bearing request or response content.
+// Keep the transport logger independent from handler logs and payload-free.
+type telegramAPILogger struct{ logger *slog.Logger }
+
+func (telegramAPILogger) Debugf(string, ...any) {}
+func (l telegramAPILogger) Errorf(string, ...any) {
+	l.logger.Warn("Telegram API request failed")
+}
+
+func WithStockholm(issuer StockholmIssuer) Option {
+	return func(b *Bot) { b.stockholm = issuer }
+}
+
+func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x3ui.ServerHandler, options ...Option) (*Bot, error) {
+	bot, err := telego.NewBot(token, telego.WithLogger(telegramAPILogger{logger: logger}))
 	if err != nil {
 		return nil, err
 	}
 
-	return &Bot{
+	b := &Bot{
 		bot:    bot,
 		logger: logger,
 		db:     db,
 		sh:     serverHandler,
-	}, nil
+	}
+	for _, option := range options {
+		if option != nil {
+			option(b)
+		}
+	}
+	return b, nil
 }
 
 func (b *Bot) Start() {

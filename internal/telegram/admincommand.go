@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -493,6 +494,23 @@ func (b *Bot) handleDeleteUser(bot *telego.Bot, update telego.Update) {
 	if err != nil {
 		msg := tu.Message(tu.ID(chatID), "Invalid user ID. It must be a number.")
 		_, _ = bot.SendMessage(msg)
+		return
+	}
+
+	// A bot-row deletion alone does not revoke a downloaded VPN credential.
+	// Preserve the account until its separate Stockholm grant is disabled.
+	target, lookupErr := b.db.GetUserByID(deleteUserID)
+	if lookupErr == nil && target.TelegramID != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		checkErr := checkStockholmDeletion(ctx, *target.TelegramID, b.db, b.stockholm)
+		cancel()
+		if checkErr != nil {
+			_, _ = bot.SendMessage(tu.Message(tu.ID(chatID), "Данные пользователя не удалены: сначала отключите его доступ к Стокгольму в Remnawave. Если доступ уже отключён, проверьте соединение с панелью и повторите команду."))
+			return
+		}
+	}
+	if lookupErr != nil && !errors.Is(lookupErr, database.ErrUserNotFound) {
+		_, _ = bot.SendMessage(tu.Message(tu.ID(chatID), "Не удалось проверить пользователя. Данные не удалены."))
 		return
 	}
 

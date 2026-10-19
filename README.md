@@ -138,3 +138,44 @@ Then add this server to telegram bot with command `/add_server`
 ## Security deployment prerequisites
 
 Provision `known_hosts` in the working directory using independently verified SSH host keys before rollout. Unknown and changed host keys now fail closed. The bot accepts account and credential operations only in private chats belonging to the Telegram sender. Command arguments are redacted in notifications and logs. Rotate panel passwords previously submitted with `/add_server`, and remove old sensitive logs/messages through the approved retention workflow. The vendored go-x3ui client omits credential-bearing response bodies and inbound objects from logs.
+
+## Optional Stockholm subscriptions
+
+The Remnawave integration adds a separate Stockholm subscription button beside
+the legacy Finland button. Finland's server records, SSH/3x-ui issuance and
+existing credentials are preserved. Never add a Remnawave node to the legacy
+`servers` table: those rows are interpreted as SSH/3x-ui servers.
+
+The feature is disabled by default. Configure the variables in `.env.example`
+through OpenBao and the private deployment environment. `REMNA_ALLOWED_TELEGRAM_IDS`
+is an explicit snapshot of approved numeric Telegram IDs; for this rollout it
+includes every currently bound account. New username-only invitations do not
+automatically join that cohort. The user must still have a bound account in
+the bot database and make the request in their own private chat.
+
+The API credential needs only `users:create` and `users:by-username`. Production
+also restricts its API paths to the bot host's source IP. Neither the operator
+admin boundary nor public subscription paths need to be widened. Keep the token,
+subscription links and raw API bodies out of logs and administrative messages.
+
+Each Telegram ID has a separate immutable provider mapping. First issuance
+creates a 30-day Stockholm account by default; repeated requests retrieve the
+same current subscription without extending expiry or reactivating disabled
+accounts. Timeouts are reconciled by a deterministic remote username. Local
+mapping failure can be retried without creating another remote account.
+
+Manage expiry and revocation through Remnawave. Disable access to reject saved
+credentials; rotating only a subscription URL is not a substitute for revoking
+downloaded VPN credentials. `/delete_user` refuses to remove a bot account
+while its Stockholm grant remains active or cannot be verified. Existing
+connections may persist until reconnect; the node does not have connection-drop
+capabilities enabled.
+
+Rollback new delivery with `REMNA_ENABLED=false`, retaining the mapping table
+and provider revocations. This does not revoke already downloaded Stockholm
+credentials. Keep Finland available during rollback.
+
+An eventual Finland import must preserve hostname, port, each VLESS UUID,
+REALITY keys/short IDs/SNI and flow. Its current 85 Vision and three empty-flow
+credentials need compatibility qualification before changing the live listener.
+Do not infer Telegram ownership from a matching historical username.
