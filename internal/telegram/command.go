@@ -22,6 +22,10 @@ func (b *Bot) registerCommands() {
 
 	b.bh.Handle(b.handleGetKeyCallback, th.CallbackDataContains("getkey_"))
 	b.bh.Handle(b.handleStockholmSubscription, th.CallbackDataEqual(CallbackStockholmSubscription))
+	b.bh.Handle(b.handleStockholmGuide, th.CallbackDataEqual(CallbackStockholmGuide))
+	b.bh.Handle(b.handleStockholmRoutingGuide, th.CallbackDataEqual(CallbackStockholmRouting))
+	b.bh.Handle(b.handleStockholmHappRouting, th.CallbackDataEqual(CallbackStockholmHappRouting))
+	b.bh.Handle(b.handleStockholmIncyRouting, th.CallbackDataEqual(CallbackStockholmIncyRouting))
 }
 
 // Handle /start command
