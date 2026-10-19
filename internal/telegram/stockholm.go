@@ -86,7 +86,16 @@ func (b *Bot) handleStockholmSubscription(bot *telego.Bot, update telego.Update)
 		"Copy this URL and add it as a subscription in Happ or INCY. Refresh it, then choose Sweden, Stockholm, Moscow → Stockholm or Moscow → Finland, and connect.\n" +
 		"Moscow routes send Russian traffic directly from Moscow and other traffic through the selected foreign exit.\n" +
 		"Keep your existing Finland profile as a fallback. The guides below cover setup and optional client-side routing."
-	if !subscription.ExpiresAt.IsZero() {
+	if subscription.TrafficLimitBytes == 0 {
+		text += "\n\nUnlimited traffic"
+	}
+	if subscription.ExpiresAt.IsZero() {
+		if subscription.TrafficLimitBytes == 0 {
+			text += " • No automatic expiry"
+		} else {
+			text += "\n\nNo automatic expiry"
+		}
+	} else {
 		text += fmt.Sprintf("\n\nExpires: %s MSK.", subscription.ExpiresAt.In(time.FixedZone("MSK", 3*60*60)).Format("02 Jan 2006, 15:04"))
 	}
 	keyboard := tu.InlineKeyboard(

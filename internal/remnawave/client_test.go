@@ -17,7 +17,7 @@ func TestClientAuthenticatesAndNeverExposesProviderErrors(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/users/by-username/otvali_tg_7":
-			fmt.Fprint(w, `{"response":{"id":12,"username":"otvali_tg_7"}}`)
+			fmt.Fprint(w, `{"response":{"id":12,"username":"otvali_tg_7","trafficLimitBytes":1234567}}`)
 		case "/api/users/by-username/missing":
 			w.WriteHeader(404)
 		default:
@@ -31,8 +31,8 @@ func TestClientAuthenticatesAndNeverExposesProviderErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.http.Transport = server.Client().Transport
-	if u, err := c.FindUser(context.Background(), "otvali_tg_7"); err != nil || u.ID != 12 {
-		t.Fatal("numeric user ID was not decoded")
+	if u, err := c.FindUser(context.Background(), "otvali_tg_7"); err != nil || u.ID != 12 || u.TrafficLimitBytes != 1234567 {
+		t.Fatal("numeric user ID or actual traffic limit was not decoded")
 	}
 	if _, err := c.FindUser(context.Background(), "missing"); err != ErrNotFound {
 		t.Fatal("404 must be distinguishable")
@@ -60,7 +60,7 @@ func TestClientDoesNotFollowCredentialBearingRedirects(t *testing.T) {
 func TestConfigDisabledAndInvalidInputsFailClosed(t *testing.T) {
 	env := map[string]string{"REMNA_ENABLED": "true", "REMNA_BASE_URL": "https://panel.example", "REMNA_API_TOKEN": "synthetic", "REMNA_SQUAD_UUID": "0306677b-2434-4918-bf55-2d5147e87c17", "REMNA_SUBSCRIPTION_ORIGIN": "https://sub.example", "REMNA_ALLOWED_TELEGRAM_IDS": "7,8"}
 	get := func(k string) string { return env[k] }
-	if c, err := LoadConfig(get); err != nil || !c.Enabled || len(c.AllowedTelegramIDs) != 2 || c.AccessDays != 30 {
+	if c, err := LoadConfig(get); err != nil || !c.Enabled || len(c.AllowedTelegramIDs) != 2 || c.AccessDays != 0 {
 		t.Fatal("valid config rejected")
 	}
 	for key, value := range map[string]string{"REMNA_ENABLED": "yes", "REMNA_BASE_URL": "http://panel.example", "REMNA_API_TOKEN": "", "REMNA_SQUAD_UUID": "bad", "REMNA_SUBSCRIPTION_ORIGIN": "https://user:secret@sub.example", "REMNA_ALLOWED_TELEGRAM_IDS": "all", "REMNA_ACCESS_DAYS": "-1"} {
@@ -75,5 +75,24 @@ func TestConfigDisabledAndInvalidInputsFailClosed(t *testing.T) {
 	env["REMNA_BASE_URL"] = "malformed"
 	if c, err := LoadConfig(get); err != nil || c.Enabled {
 		t.Fatal("disabled feature must not require credentials")
+	}
+}
+
+func TestConfigAcceptsUnlimitedAndExplicitFiniteAccess(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		days int
+		ok   bool
+	}{
+		{"", 0, true}, {"0", 0, true}, {"1", 1, true}, {"30", 30, true}, {"3660", 3660, true},
+		{"-1", 0, false}, {"3661", 0, false}, {"forever", 0, false},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			env := map[string]string{"REMNA_ENABLED": "true", "REMNA_BASE_URL": "https://panel.example", "REMNA_API_TOKEN": "synthetic", "REMNA_SQUAD_UUID": "0306677b-2434-4918-bf55-2d5147e87c17", "REMNA_SUBSCRIPTION_ORIGIN": "https://sub.example", "REMNA_ALLOWED_TELEGRAM_IDS": "7", "REMNA_ACCESS_DAYS": tc.raw}
+			cfg, err := LoadConfig(func(key string) string { return env[key] })
+			if tc.ok != (err == nil) || (err == nil && cfg.AccessDays != tc.days) {
+				t.Fatal("access-duration boundary was not enforced")
+			}
+		})
 	}
 }

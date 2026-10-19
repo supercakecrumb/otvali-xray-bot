@@ -26,6 +26,7 @@ type User struct {
 	TelegramID           *int64    `json:"telegramId"`
 	Tag                  string    `json:"tag"`
 	ExpireAt             time.Time `json:"expireAt"`
+	TrafficLimitBytes    int64     `json:"trafficLimitBytes"`
 	SubscriptionURL      string    `json:"subscriptionUrl"`
 	ActiveInternalSquads []Squad   `json:"activeInternalSquads"`
 }

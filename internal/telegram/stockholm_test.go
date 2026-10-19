@@ -230,6 +230,27 @@ func TestStockholmGuideAcknowledgesPrivateActorWithoutIssuingCredentials(t *test
 	}
 }
 
+func TestStockholmSubscriptionShowsActualUnlimitedPolicy(t *testing.T) {
+	for _, limit := range []int64{0, 1234567} {
+		issuer := &fakeStockholmIssuer{eligible: true, subscription: remnawave.Subscription{
+			URL: "https://subscriptions.example/api/sub/private-bearer", TrafficLimitBytes: limit,
+		}}
+		b, caller, _ := stockholmTestBot(t, issuer)
+		b.handleStockholmSubscription(b.bot, stockholmUpdate())
+		var text string
+		json.Unmarshal(caller.calls[1].body["text"], &text)
+		if !strings.Contains(text, "No automatic expiry") || strings.Contains(text, "2099") || strings.Contains(text, "Expires:") {
+			t.Fatal("no-expiry policy must have a human-readable label")
+		}
+		if strings.Contains(text, "Unlimited traffic") != (limit == 0) {
+			t.Fatal("unlimited traffic must reflect the provider's actual quota")
+		}
+		if limit == 0 && !strings.Contains(text, "Unlimited traffic • No automatic expiry") {
+			t.Fatal("unlimited policy label missing")
+		}
+	}
+}
+
 func TestStockholmRoutingProfilesAreOptInAndUseVerifiedRules(t *testing.T) {
 	for _, tc := range []struct {
 		name, callback, scheme string

@@ -3,6 +3,7 @@ package remnawave
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -41,6 +42,7 @@ type memoryAPI struct {
 	user           *User
 	creates, finds int
 	ambiguous      bool
+	lastCreate     CreateUserRequest
 }
 
 func (m *memoryAPI) FindUser(context.Context, string) (User, error) {
@@ -56,9 +58,10 @@ func (m *memoryAPI) CreateUser(_ context.Context, r CreateUserRequest) (User, er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.creates++
+	m.lastCreate = r
 	id := r.TelegramID
 	m.user = &User{ID: 17, Username: r.Username, TelegramID: &id, Tag: r.Tag, Status: r.Status,
-		ExpireAt: r.ExpireAt, SubscriptionURL: "https://sub.example/api/sub/private-grant",
+		ExpireAt: r.ExpireAt, TrafficLimitBytes: r.TrafficLimitBytes, SubscriptionURL: "https://sub.example/api/sub/private-grant",
 		ActiveInternalSquads: []Squad{{UUID: r.ActiveInternalSquads[0]}}}
 	if m.ambiguous {
 		return User{}, ErrUnavailable
@@ -204,5 +207,70 @@ func TestDeletionCheckRequiresExplicitProviderDisable(t *testing.T) {
 	}
 	if a.creates != 1 {
 		t.Fatal("deletion check changed provider access")
+	}
+}
+
+func TestUnlimitedAndFiniteCreationPreservePolicyOnRetry(t *testing.T) {
+	for _, days := range []int{0, 1, 30, 3660} {
+		t.Run("days_"+strconv.Itoa(days), func(t *testing.T) {
+			s, api, _ := serviceFixture()
+			s.config.AccessDays = days
+			initial := s.now()
+			first, err := s.Issue(context.Background(), 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := initial.AddDate(0, 0, days)
+			if days == 0 {
+				want = time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC)
+			}
+			if !api.lastCreate.ExpireAt.Equal(want) || api.lastCreate.TrafficLimitBytes != 0 || api.lastCreate.TrafficLimitStrategy != "NO_RESET" {
+				t.Fatal("creation must use the exact expiry policy and an unlimited traffic allowance")
+			}
+			if first.ExpiresAt.IsZero() != (days == 0) || first.TrafficLimitBytes != 0 {
+				t.Fatal("delivery did not normalize the no-expiry sentinel")
+			}
+			s.now = func() time.Time { return initial.Add(time.Hour) }
+			second, err := s.Issue(context.Background(), 7)
+			if err != nil || api.creates != 1 || first != second || !api.user.ExpireAt.Equal(want) {
+				t.Fatal("retry changed identity, URL, expiry or remote access policy")
+			}
+		})
+	}
+}
+
+func TestUnlimitedDefaultDoesNotRewriteExistingFiniteAccount(t *testing.T) {
+	s, api, _ := serviceFixture()
+	first, err := s.Issue(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.config.AccessDays = 0
+	second, err := s.Issue(context.Background(), 7)
+	if err != nil || first != second || second.ExpiresAt.IsZero() || api.creates != 1 {
+		t.Fatal("switching the default must preserve an existing finite account")
+	}
+}
+
+func TestNoExpiryReadbackStillEnforcesStatusAndActualQuota(t *testing.T) {
+	s, api, _ := serviceFixture()
+	s.config.AccessDays = 0
+	if _, err := s.Issue(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	api.user.ExpireAt = time.Date(2099, time.June, 30, 0, 0, 0, 0, time.UTC)
+	api.user.TrafficLimitBytes = 1234567
+	sub, err := s.Issue(context.Background(), 7)
+	if err != nil || !sub.ExpiresAt.IsZero() || sub.TrafficLimitBytes != 1234567 {
+		t.Fatal("readback must recognize the documented 2099 year and preserve actual quota metadata")
+	}
+	for _, status := range []string{"DISABLED", "EXPIRED", "LIMITED"} {
+		api.user.Status = status
+		if sub, err := s.Issue(context.Background(), 7); !errors.Is(err, ErrInactive) || sub.URL != "" {
+			t.Fatal("no-expiry must not bypass inactive provider status")
+		}
+	}
+	if api.creates != 1 {
+		t.Fatal("policy readback recreated an existing account")
 	}
 }

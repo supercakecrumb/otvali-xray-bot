@@ -43,11 +43,11 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return Config{}, errors.New("REMNA_SQUAD_UUID must be a nonzero UUID")
 	}
 	c.SquadUUID = squad.String()
-	c.AccessDays = 30
+	// Zero uses Remnawave's documented 2099 no-expiry sentinel.
 	if raw := getenv("REMNA_ACCESS_DAYS"); raw != "" {
 		days, err := strconv.Atoi(raw)
-		if err != nil || days < 1 || days > 3660 {
-			return Config{}, errors.New("REMNA_ACCESS_DAYS must be between 1 and 3660")
+		if err != nil || days < 0 || days > 3660 {
+			return Config{}, errors.New("REMNA_ACCESS_DAYS must be 0 for no automatic expiry or between 1 and 3660")
 		}
 		c.AccessDays = days
 	}

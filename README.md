@@ -159,12 +159,20 @@ admin boundary nor public subscription paths need to be widened. Keep the token,
 subscription links and raw API bodies out of logs and administrative messages.
 
 Each Telegram ID has a separate immutable provider mapping. First issuance
-creates a 30-day Stockholm account by default; repeated requests retrieve the
-same current subscription without extending expiry or reactivating disabled
+creates access with **unlimited traffic and no automatic expiry** by default
+(`REMNA_ACCESS_DAYS=0`, including when unset). Remnawave requires an expiration
+timestamp; the bot uses `2099-01-01T00:00:00Z`, which the pinned backend
+[recognizes as no expiry](https://github.com/remnawave/backend/blob/3.4.5/src/modules/subscription/utils/get-user-info.headers.ts)
+and exposes as `expire=0`, with `trafficLimitBytes=0` for unlimited traffic.
+The bot shows “Unlimited traffic • No automatic expiry” instead of 2099.
+Explicit `REMNA_ACCESS_DAYS=1..3660` retains finite-duration support.
+Repeated requests retrieve the same current subscription without extending
+expiry, converting an existing finite account to unlimited, or reactivating disabled
 accounts. Timeouts are reconciled by a deterministic remote username. Local
 mapping failure can be retried without creating another remote account.
 
-Manage expiry and revocation through Remnawave. Disable access to reject saved
+Manage existing account policy and revocation through Remnawave; changing the
+default does not rewrite already-created accounts. Disable access to reject saved
 credentials; rotating only a subscription URL is not a substitute for revoking
 downloaded VPN credentials. `/delete_user` refuses to remove a bot account
 while its Stockholm grant remains active or cannot be verified. Existing

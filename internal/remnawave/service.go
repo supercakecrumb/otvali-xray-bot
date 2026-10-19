@@ -26,8 +26,9 @@ type Store interface {
 }
 
 type Subscription struct {
-	URL       string
-	ExpiresAt time.Time
+	URL               string
+	ExpiresAt         time.Time
+	TrafficLimitBytes int64
 }
 
 type Service struct {
@@ -82,9 +83,13 @@ func (s *Service) Issue(ctx context.Context, telegramID int64) (Subscription, er
 			// A mapped account that an operator deleted must not be recreated.
 			return Subscription{}, ErrInactive
 		}
+		expiresAt := time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC)
+		if s.config.AccessDays > 0 {
+			expiresAt = s.now().UTC().AddDate(0, 0, s.config.AccessDays)
+		}
 		_, createErr := s.api.CreateUser(ctx, CreateUserRequest{
 			Username: username, TelegramID: telegramID, Tag: accountTag, Status: "ACTIVE",
-			ExpireAt:             s.now().UTC().AddDate(0, 0, s.config.AccessDays),
+			ExpireAt:             expiresAt,
 			TrafficLimitStrategy: "NO_RESET", ActiveInternalSquads: []string{s.config.SquadUUID},
 		})
 		// Read back even after a successful POST. A timeout or conflict is
@@ -108,7 +113,9 @@ func (s *Service) Issue(ctx context.Context, telegramID int64) (Subscription, er
 		}
 	}
 	// Retrieval never extends access, changes squads or reactivates accounts.
-	if user.Status != "ACTIVE" || !user.ExpireAt.After(s.now()) {
+	// Backend 3.4.5's get-user-info.headers.ts emits expire=0 for year 2099.
+	noAutomaticExpiry := user.ExpireAt.UTC().Year() == 2099
+	if user.Status != "ACTIVE" || (!noAutomaticExpiry && !user.ExpireAt.After(s.now())) {
 		return Subscription{}, ErrInactive
 	}
 	assigned := false
@@ -123,7 +130,11 @@ func (s *Service) Issue(ctx context.Context, telegramID int64) (Subscription, er
 	if err != nil || origin == nil || u.Scheme != "https" || !strings.EqualFold(u.Host, origin.Host) || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !strings.HasPrefix(u.Path, "/api/sub/") || len(u.Path) <= len("/api/sub/") {
 		return Subscription{}, ErrUnavailable
 	}
-	return Subscription{URL: user.SubscriptionURL, ExpiresAt: user.ExpireAt}, nil
+	expiresAt := user.ExpireAt
+	if noAutomaticExpiry {
+		expiresAt = time.Time{}
+	}
+	return Subscription{URL: user.SubscriptionURL, ExpiresAt: expiresAt, TrafficLimitBytes: user.TrafficLimitBytes}, nil
 }
 
 // CheckDisabled lets an authenticated administrator verify revocation before
