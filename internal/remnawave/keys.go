@@ -28,8 +28,10 @@ type subscriptionReader interface {
 	ReadSubscription(context.Context, string) ([]ServerKey, error)
 }
 
-// Keys keeps the existing account, expiry, revocations and immutable mapping.
-// A standalone key is an export of that account's current profile, not a new user.
+// Keys exports the current profiles of the subscription account. Like Issue it
+// is an explicit issuance action: the first call creates the account and its
+// immutable grant. Later calls never change the account, expiry, revocations
+// or mapping, and never create a second account.
 func (s *Service) Keys(ctx context.Context, telegramID int64) ([]ServerKey, error) {
 	if !s.Eligible(ctx, telegramID) {
 		return nil, ErrNotEligible

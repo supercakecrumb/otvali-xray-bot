@@ -94,7 +94,7 @@ func (m *memoryKeyAPI) ReadSubscription(_ context.Context, raw string) ([]Server
 	return parseServerKeys([]byte(testServerKey))
 }
 
-func TestSingleKeysReuseAccountAndRespectRevocation(t *testing.T) {
+func TestKeyListingIssuesSameAccountAndRespectsRevocation(t *testing.T) {
 	s, api, store := serviceFixture()
 	reader := &memoryKeyAPI{memoryAPI: api}
 	s.api = reader
