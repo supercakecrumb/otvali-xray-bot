@@ -15,7 +15,10 @@ import (
 
 var ErrUnauthorized = errors.New("unauthorized")
 
-const maxInitData = 16 * 1024
+const (
+	maxInitData    = 16 * 1024
+	maxInitDataAge = time.Hour
+)
 
 // ValidateInitData implements Telegram's bot-token HMAC contract. The modern
 // signature field remains in the check string; only hash is excluded.
@@ -53,8 +56,11 @@ func ValidateInitData(raw, botToken string, now time.Time) (int64, error) {
 	if err != nil || seconds <= 0 {
 		return 0, ErrUnauthorized
 	}
+	// Launch data is fixed when Telegram opens the Mini App. One hour covers
+	// importing the subscription in another app and returning for a key; the
+	// data only travels in the Authorization header to this API.
 	age := now.Sub(time.Unix(seconds, 0))
-	if age < -30*time.Second || age > 5*time.Minute {
+	if age < -30*time.Second || age > maxInitDataAge {
 		return 0, ErrUnauthorized
 	}
 	var user struct {

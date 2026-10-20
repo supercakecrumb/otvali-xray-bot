@@ -211,7 +211,8 @@ The frontend sends `Authorization: tma <Telegram.WebApp.initData>` and
 `Content-Type: application/json` on every private POST. The backend verifies
 Telegram's [official bot-token HMAC contract](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app),
 including all signed fields except `hash`, and accepts `auth_date` for at most
-five minutes with a 30-second future clock allowance. Reopen the Mini App when
+one hour with a 30-second future clock allowance. That covers importing a
+subscription in another app and returning for a key. Reopen the Mini App when
 that launch data expires. Use a menu/inline web-app button or main Mini App;
 reply-keyboard launch does not supply the required signed user data. No cookie,
 local login account or frontend-selected Telegram ID is accepted. Origins are

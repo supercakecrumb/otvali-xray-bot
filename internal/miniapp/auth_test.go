@@ -53,7 +53,7 @@ func TestInitDataRejectsForgeryAndAmbiguousOrExpiredInput(t *testing.T) {
 			case "tampered_signature":
 				values.Set("signature", "another-signature")
 			case "expired":
-				values.Set("auth_date", strconv.FormatInt(testNow.Add(-301*time.Second).Unix(), 10))
+				values.Set("auth_date", strconv.FormatInt(testNow.Add(-maxInitDataAge-time.Second).Unix(), 10))
 				raw = sign(values)
 			case "future":
 				values.Set("auth_date", strconv.FormatInt(testNow.Add(31*time.Second).Unix(), 10))
@@ -93,9 +93,12 @@ func TestInitDataRejectsForgeryAndAmbiguousOrExpiredInput(t *testing.T) {
 		})
 	}
 }
-func TestInitDataFiveMinuteBoundary(t *testing.T) {
-	if _, err := ValidateInitData(initData(42), testToken, testNow.Add(5*time.Minute)); err != nil {
-		t.Fatal("five-minute boundary should remain valid")
+func TestInitDataOneHourBoundary(t *testing.T) {
+	if _, err := ValidateInitData(initData(42), testToken, testNow.Add(time.Hour)); err != nil {
+		t.Fatal("one-hour boundary should remain valid")
+	}
+	if _, err := ValidateInitData(initData(42), testToken, testNow.Add(time.Hour+time.Second)); err == nil {
+		t.Fatal("launch data older than one hour must expire")
 	}
 	if _, err := ValidateInitData(initData(42), "wrong-token", testNow); err == nil {
 		t.Fatal("another bot token must fail")
