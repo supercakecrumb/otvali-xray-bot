@@ -3,7 +3,6 @@ package telegram
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -186,7 +185,7 @@ func (b *Bot) rejectDisabledServer(bot *telego.Bot, update telego.Update) {
 	}
 }
 
-// Generate key process with animated dots and message updates
+// Generate the existing legacy key with one loading edit and one final edit.
 func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	chatID := update.CallbackQuery.Message.GetChat().ID
 	messageID := update.CallbackQuery.Message.GetMessageID()
@@ -197,29 +196,24 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 		CallbackQueryID: update.CallbackQuery.ID,
 	})
 	if err != nil {
-		b.logger.Error("Failed to answer callback query", "error", err)
-		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), "Не удалось ответить на callback query")
+		b.logger.Warn("Failed to acknowledge legacy key request")
+		b.NotifyAdminsOfError(username, chatID, "key_generation", "callback_ack_failed", "Не удалось ответить на callback query")
 	}
 
-	keyMsg, cancel, err := b.sendMessageWithAnimatedDots(chatID, messageID, "Генерирую ключ")
+	keyMsg, err := b.sendKeyLoadingMessage(chatID, messageID)
 	if err != nil {
-		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
-		keyMsg.Text = errorMsg
+		keyMsg.Text = "Не удалось получить ключ. Попробуйте ещё раз или напишите администратору."
 		_, _ = b.bot.EditMessageText(keyMsg)
-		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), fmt.Sprintf("Не удалось начать анимацию генерации ключа для сервера ID: %d", serverID))
+		b.NotifyAdminsOfError(username, chatID, "key_generation", "loading_message_failed", fmt.Sprintf("Не удалось показать сообщение загрузки ключа для сервера ID: %d", serverID))
 		return
 	}
 
-	defer cancel()
-
 	server, err := b.db.GetServerByID(int64(serverID))
 	if err != nil {
-		b.logger.Error("error getting server from db", slog.String("error", err.Error()))
-		cancel() // Stop the animation
-		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
-		keyMsg.Text = errorMsg
+		b.logger.Warn("Legacy server lookup unavailable")
+		keyMsg.Text = "Не удалось получить ключ. Попробуйте ещё раз или напишите администратору."
 		_, _ = b.bot.EditMessageText(keyMsg)
-		b.NotifyAdminsOfError(username, chatID, "key_generation", err.Error(), fmt.Sprintf("Не удалось получить сервер из БД, ID: %d", serverID))
+		b.NotifyAdminsOfError(username, chatID, "key_generation", "server_lookup_failed", fmt.Sprintf("Не удалось получить сервер из БД, ID: %d", serverID))
 		return
 	}
 
@@ -228,15 +222,11 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	// Proceed to generate the key
 	key, err := b.sh.GetUserKey(server, username, chatID)
 	if err != nil {
-		cancel() // Stop the animation
-		errorMsg := fmt.Sprintf("Произошла ошибка при генерации ключа: %v", err)
-		keyMsg.Text = errorMsg
+		keyMsg.Text = "Не удалось получить ключ. Попробуйте ещё раз или напишите администратору."
 		_, _ = b.bot.EditMessageText(keyMsg)
-		b.NotifyAdminsOfKeyRequest(username, chatID, serverName, false, err.Error())
+		b.NotifyAdminsOfKeyRequest(username, chatID, serverName, false, "legacy_key_unavailable")
 		return
 	}
-
-	cancel() // Stop the animation
 
 	// Edit the message to show the generated key in monospace
 	keyText := legacyKeyCaption(serverName, key)
@@ -261,43 +251,14 @@ func legacyKeyCaption(serverName, key string) string {
 		escapeMarkdownV2("Добавьте полный vless:// ключ в Happ или INCY как сервер. Установка: /help_setup. Ключ никому не передавайте.")
 }
 
-func (b *Bot) sendMessageWithAnimatedDots(chatID int64, messageID int, loadingText string) (*telego.EditMessageTextParams, context.CancelFunc, error) {
+// A single synchronous edit keeps loading and final delivery in one goroutine.
+func (b *Bot) sendKeyLoadingMessage(chatID int64, messageID int) (*telego.EditMessageTextParams, error) {
 	editMsg := &telego.EditMessageTextParams{
-		ChatID:    tu.ID(chatID),
-		MessageID: messageID,
-		Text:      loadingText,
+		ChatID: tu.ID(chatID), MessageID: messageID, Text: "Генерирую ключ…",
 	}
-
 	_, err := b.bot.EditMessageText(editMsg)
 	if err != nil {
-		b.logger.Error("Failed to edit message", "error", err)
-		return editMsg, nil, err
+		b.logger.Warn("Failed to deliver key loading message")
 	}
-
-	// Start the loading animation
-	ctx, cancel := context.WithCancel(context.Background())
-	go b.animateDots(ctx, editMsg, loadingText)
-
-	return editMsg, cancel, nil
-}
-
-// Animate dots in the loading message
-func (b *Bot) animateDots(ctx context.Context, editMsg *telego.EditMessageTextParams, baseText string) {
-	dots := []string{".", "..", "...", ""}
-	i := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			editMsg.Text = baseText + dots[i%len(dots)]
-			_, err := b.bot.EditMessageText(editMsg)
-			if err != nil {
-				b.logger.Error("Failed to edit message during dots animation", "error", err)
-				return
-			}
-			time.Sleep(300 * time.Millisecond)
-			i++
-		}
-	}
+	return editMsg, err
 }

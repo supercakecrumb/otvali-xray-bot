@@ -49,7 +49,8 @@ func (b *Bot) handleStockholmSubscription(bot *telego.Bot, update telego.Update)
 	subscription, err := b.stockholm.Issue(ctx, update.CallbackQuery.From.ID)
 	if err != nil || !validSubscriptionURL(subscription.URL) {
 		b.logger.Warn("VPN subscription request failed")
-		b.editStockholmMessage(bot, update, "Не удалось получить подписку. Попробуйте позже или напишите администратору.", nil)
+		text, retryable := managedAccessError(err)
+		b.editStockholmMessage(bot, update, text, managedFailureKeyboard(retryable, CallbackStockholmSubscription, CallbackGetKey, "⬅️ Получить VPN"))
 		return
 	}
 	text := "<b>Подписка Otvali — все маршруты</b>\n\n<code>" + html.EscapeString(subscription.URL) + "</code>\n\nСкопируйте ссылку и добавьте её в Happ или INCY как подписку."

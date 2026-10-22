@@ -12,15 +12,19 @@ import (
 )
 
 type fakeStore struct {
-	user    *database.User
-	users   map[int64]*database.User
-	server  *database.Server
-	lookups []int64
-	err     error
+	user        *database.User
+	users       map[int64]*database.User
+	server      *database.Server
+	lookups     []int64
+	err         error
+	afterLookup func()
 }
 
 func (f *fakeStore) GetUserByTelegramID(id int64) (*database.User, error) {
 	f.lookups = append(f.lookups, id)
+	if f.afterLookup != nil {
+		defer f.afterLookup()
+	}
 	if f.users != nil {
 		return f.users[id], f.err
 	}

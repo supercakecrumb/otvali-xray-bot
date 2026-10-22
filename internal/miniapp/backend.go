@@ -48,11 +48,23 @@ func (s *Service) requestStore(ctx context.Context) Store {
 }
 
 func (s *Service) bound(ctx context.Context, id int64) (*database.User, error) {
-	if id <= 0 || s.store == nil || ctx.Err() != nil {
+	if id <= 0 {
 		return nil, ErrForbidden
 	}
+	if s.store == nil || ctx.Err() != nil {
+		return nil, ErrUnavailable
+	}
 	user, err := s.requestStore(ctx).GetUserByTelegramID(id)
-	if err != nil || user == nil || user.TelegramID == nil || *user.TelegramID != id || ctx.Err() != nil {
+	if ctx.Err() != nil {
+		return nil, ErrUnavailable
+	}
+	if errors.Is(err, database.ErrUserNotFound) {
+		return nil, ErrForbidden
+	}
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	if user == nil || user.TelegramID == nil || *user.TelegramID != id {
 		return nil, ErrForbidden
 	}
 	return user, nil

@@ -59,16 +59,25 @@ func (b *Bot) handleIndividualKeys(bot *telego.Bot, update telego.Update) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	var keys []remnawave.ServerKey
+	var managedErr error
 	issuer, ok := b.stockholm.(individualKeyIssuer)
 	if ok && b.stockholm.Eligible(ctx, update.CallbackQuery.From.ID) {
 		var err error
 		keys, err = issuer.Keys(ctx, update.CallbackQuery.From.ID)
 		if err != nil {
 			b.logger.Warn("Individual VPN key list unavailable")
-			text += "\n\nНовые ключи временно недоступны. Попробуйте позже."
+			managedErr = err
+			message, _ := managedAccessError(err)
+			text += "\n\n" + message
 		}
 	}
-	b.editStockholmMessage(bot, update, text, b.individualKeysKeyboard(servers, keys))
+	keyboard := b.individualKeysKeyboard(servers, keys)
+	if managedErr != nil {
+		if _, retryable := managedAccessError(managedErr); retryable {
+			keyboard.InlineKeyboard = append([][]telego.InlineKeyboardButton{tu.InlineKeyboardRow(tu.InlineKeyboardButton("🔄 Повторить").WithCallbackData(CallbackIndividualKeys))}, keyboard.InlineKeyboard...)
+		}
+	}
+	b.editStockholmMessage(bot, update, text, keyboard)
 }
 
 func (b *Bot) handleManagedKey(bot *telego.Bot, update telego.Update) {
@@ -94,7 +103,8 @@ func (b *Bot) handleManagedKey(bot *telego.Bot, update telego.Update) {
 	keys, err := issuer.Keys(ctx, callback.From.ID)
 	if err != nil {
 		b.logger.Warn("Individual VPN key request failed")
-		b.managedKeyUnavailable(bot, update)
+		text, retryable := managedAccessError(err)
+		b.editStockholmMessage(bot, update, text, managedFailureKeyboard(retryable, callback.Data, CallbackIndividualKeys, "⬅️ Отдельные ключи"))
 		return
 	}
 	for _, key := range keys {

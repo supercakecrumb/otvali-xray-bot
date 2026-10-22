@@ -24,15 +24,23 @@ func (b *Bot) userUsernameMiddleware() th.Middleware {
 
 // Middleware to ensure user is registered and update user info
 func (b *Bot) userDatabaseMiddleware() th.Middleware {
+	return b.userDatabaseMiddlewareWithStore(b.db)
+}
+
+type userMiddlewareStore interface {
+	GetUserByTelegramID(int64) (*database.User, error)
+	GetUserByUsername(string) (*database.User, error)
+	UpdateUserUsername(int64, string) error
+	UpdateUserTelegramID(int64, int64) error
+}
+
+func (b *Bot) userDatabaseMiddlewareWithStore(store userMiddlewareStore) th.Middleware {
 	return func(bot *telego.Bot, update telego.Update, next th.Handler) {
-		var chatID int64
 		var fromUser *telego.User
 
 		if update.Message != nil {
-			chatID = update.Message.Chat.ID
 			fromUser = update.Message.From
 		} else if update.CallbackQuery != nil {
-			chatID = update.CallbackQuery.From.ID
 			fromUser = &update.CallbackQuery.From
 		} else {
 			// Unsupported update, skip
@@ -51,12 +59,12 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 		b.logger.Debug("Ensuring that user is in database", slog.Int64("telegram ID", telegramID), slog.String("username", username))
 
 		// Try to get user by TelegramID
-		user, err := b.db.GetUserByTelegramID(telegramID)
+		user, err := store.GetUserByTelegramID(telegramID)
 		if err == nil {
 			// User found by TelegramID
 			// Update username if changed
 			if user.Username != username {
-				if err := b.db.UpdateUserUsername(user.ID, username); err != nil {
+				if err := store.UpdateUserUsername(user.ID, username); err != nil {
 					b.logger.Error("Failed to update username", slog.String("error", err.Error()))
 				}
 			}
@@ -66,21 +74,24 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 		}
 
 		if !errors.Is(err, database.ErrUserNotFound) {
-			b.logger.Error("Error retrieving user by TelegramID", slog.String("error", err.Error()))
+			b.logger.Warn("User lookup unavailable")
+			b.rejectUserUpdate(bot, update, "Сервис временно недоступен. Попробуйте позже.")
 			return
 		}
 
 		// User not found by TelegramID, try by Username
-		user, err = b.db.GetUserByUsername(username)
+		user, err = store.GetUserByUsername(username)
 		if err == nil {
 			// User found by Username
 			if user.TelegramID != nil && *user.TelegramID != telegramID {
+				b.rejectUserUpdate(bot, update, "Для этого аккаунта доступа нет. Напишите администратору.")
 				return
 			}
 			// Update TelegramID
 			if user.TelegramID == nil {
-				if err := b.db.UpdateUserTelegramID(user.ID, telegramID); err != nil {
-					b.logger.Error("Failed to update TelegramID", slog.String("error", err.Error()))
+				if err := store.UpdateUserTelegramID(user.ID, telegramID); err != nil {
+					b.logger.Warn("User binding unavailable")
+					b.rejectUserUpdate(bot, update, "Сервис временно недоступен. Попробуйте позже.")
 					return
 				}
 			}
@@ -90,16 +101,30 @@ func (b *Bot) userDatabaseMiddleware() th.Middleware {
 		}
 
 		if !errors.Is(err, database.ErrUserNotFound) {
-			b.logger.Error("Error retrieving user by Username", slog.String("error", err.Error()))
+			b.logger.Warn("User lookup unavailable")
+			b.rejectUserUpdate(bot, update, "Сервис временно недоступен. Попробуйте позже.")
 			return
 		}
 
 		// User not found, send message that they must be invited first
-		msg := tu.Message(
-			tu.ID(chatID),
-			youMustBeInvitedResponse,
-		)
-		_, _ = bot.SendMessage(msg)
+		b.rejectUserUpdate(bot, update, youMustBeInvitedResponse)
+	}
+}
+
+// Only rejection paths acknowledge here; accepted callbacks are acknowledged by
+// their handler. This keeps exactly one answer without widening authorization.
+func (b *Bot) rejectUserUpdate(bot *telego.Bot, update telego.Update, text string) {
+	if !isPrivateActorUpdate(update) {
+		return
+	}
+	if update.CallbackQuery != nil {
+		if err := bot.AnswerCallbackQuery(&telego.AnswerCallbackQueryParams{CallbackQueryID: update.CallbackQuery.ID, Text: text, ShowAlert: true}); err != nil {
+			b.logger.Warn("Failed to acknowledge unavailable account")
+		}
+		return
+	}
+	if _, err := bot.SendMessage(tu.Message(tu.ID(update.Message.From.ID), text)); err != nil {
+		b.logger.Warn("Failed to deliver account response")
 	}
 }
 

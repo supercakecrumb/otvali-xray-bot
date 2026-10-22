@@ -33,25 +33,16 @@ func (b *Bot) registerCommands() {
 
 // Handle /start command
 func (b *Bot) handleStart(bot *telego.Bot, update telego.Update) {
+	if !isPrivateActorUpdate(update) || update.Message == nil {
+		return
+	}
 	chatID := update.Message.Chat.ID
 	username := update.Message.From.Username
 
 	// Notify admins about command usage
 	b.NotifyAdminsOfCommand(username, chatID, "/start", "")
 
-	welcomeMessage := "Добро пожаловать! Используйте /help, чтобы узнать доступные команды.\n\n" +
-		"💬 Для связи с администратором просто напишите сообщение в этом чате."
-
-	msg := tu.Message(
-		tu.ID(chatID),
-		welcomeMessage,
-	)
-
-	_, err := bot.SendMessage(msg)
-	if err != nil {
-		b.logger.Error("Failed to send start message", "error", err)
-		b.NotifyAdminsOfError(username, chatID, "/start", err.Error(), "Не удалось отправить приветственное сообщение")
-	}
+	b.handleHelp(bot, update)
 }
 
 // Handle /invite command
