@@ -7,5 +7,5 @@ const (
 	InstructionAndroid = "<b>Android</b>" + platformImportText + "\n\nОшибка TUN / permission denied: отключите другой VPN, проверьте Always-on VPN / блокировку без VPN в настройках Android и разрешите VPN для выбранного приложения."
 	InstructionIOS     = "<b>iOS</b>" + platformImportText
 	InstructionMacOS   = "<b>macOS</b>" + platformImportText
-	howItWorksText     = "<b>Как это работает</b>\n\nОдна подписка содержит все новые маршруты. Обновляйте её в Happ или INCY.\n\nДля ручного подключения есть отдельные ключи. Старый ключ Финляндии продолжает работать.\n\nУстановка: /help_setup. Ссылки и ключи не передавайте другим."
+	howItWorksText     = "<b>Как это работает</b>\n\nОдна подписка содержит все новые маршруты. Обновляйте её в Happ или INCY.\n\nДля ручного подключения есть отдельные ключи. Старый ключ Финляндии продолжает работать.\n\nУстановка: /help_setup. Проверка доступа: /status. Ссылки и ключи не передавайте другим."
 )

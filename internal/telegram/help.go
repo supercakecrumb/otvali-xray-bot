@@ -61,6 +61,33 @@ func (b *Bot) guideURL(anchor string) string {
 	return u.String()
 }
 
+// WithMiniAppURL accepts only an explicitly allowed public origin. Telegram
+// sends signed launch data to this URL, so a general help link is insufficient.
+func WithMiniAppURL(raw string, allowedOrigins []string) (Option, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return func(b *Bot) { b.miniAppURL = "" }, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, errors.New("Mini App launch URL must use an allowed public HTTPS origin")
+	}
+	for _, origin := range allowedOrigins {
+		if origin == u.Scheme+"://"+u.Host {
+			return func(b *Bot) { b.miniAppURL = u.String() }, nil
+		}
+	}
+	return nil, errors.New("Mini App launch origin is not allowed")
+}
+
+func (b *Bot) mainMenuKeyboard() *telego.InlineKeyboardMarkup {
+	var rows [][]telego.InlineKeyboardButton
+	if b.miniAppURL != "" {
+		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Открыть приложение").WithWebApp(&telego.WebAppInfo{URL: b.miniAppURL})))
+	}
+	return tu.InlineKeyboard(append(rows, helpKeyboard.InlineKeyboard...)...)
+}
+
 func (b *Bot) installationKeyboard() *telego.InlineKeyboardMarkup {
 	rows := [][]telego.InlineKeyboardButton{
 		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Windows").WithCallbackData(CallbackHelpVPNWindows), tu.InlineKeyboardButton("macOS").WithCallbackData(CallbackHelpVPNMacOS)),
@@ -90,7 +117,7 @@ func (b *Bot) handleHelp(bot *telego.Bot, update telego.Update) {
 	if !isPrivateActorUpdate(update) || update.Message == nil {
 		return
 	}
-	_, err := bot.SendMessage(tu.Message(tu.ID(update.Message.Chat.ID), helpMessage).WithReplyMarkup(helpKeyboard))
+	_, err := bot.SendMessage(tu.Message(tu.ID(update.Message.Chat.ID), helpMessage).WithReplyMarkup(b.mainMenuKeyboard()))
 	if err != nil {
 		b.logger.Warn("Failed to deliver help")
 	}
@@ -137,8 +164,9 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 		text, keyboard = InstructionMacOS, b.platformKeyboard("macos")
 	case CallbackHelpHowItWorks:
 		text = howItWorksText
+		keyboard = tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("Проверить доступ").WithCallbackData(CallbackAccountStatus)), helpBackKeyboard.InlineKeyboard[0])
 	case CallbackHelpBack:
-		text, keyboard = helpMessage, helpKeyboard
+		text, keyboard = helpMessage, b.mainMenuKeyboard()
 	default:
 		return
 	}

@@ -17,6 +17,7 @@ type fakeStore struct {
 	server      *database.Server
 	lookups     []int64
 	err         error
+	serverErr   error
 	afterLookup func()
 }
 
@@ -33,6 +34,9 @@ func (f *fakeStore) GetUserByTelegramID(id int64) (*database.User, error) {
 func (f *fakeStore) GetServerByID(id int64) (*database.Server, error) {
 	if id != 1 {
 		return nil, errors.New("unexpected server")
+	}
+	if f.serverErr != nil {
+		return nil, f.serverErr
 	}
 	return f.server, f.err
 }

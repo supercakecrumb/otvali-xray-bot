@@ -14,6 +14,7 @@ func (b *Bot) registerCommands() {
 	b.bh.Handle(b.handleStart, th.CommandEqual("start"))
 	b.bh.Handle(b.handleHelp, th.CommandEqual("help"))
 	b.bh.Handle(b.handleHelpSetup, th.CommandEqual("help_setup"))
+	b.bh.Handle(b.handleAccountStatus, th.CommandEqual("status"))
 	b.bh.Handle(b.handleInvite, th.CommandEqual("invite"))
 
 	b.bh.Handle(b.handleGetKey, th.CommandEqual("get_key"))
@@ -23,6 +24,7 @@ func (b *Bot) registerCommands() {
 
 	b.bh.Handle(b.handleGetKeyCallback, th.CallbackDataContains("getkey_"))
 	b.bh.Handle(b.handleIndividualKeys, th.CallbackDataEqual(CallbackIndividualKeys))
+	b.bh.Handle(b.handleAccountStatusCallback, th.CallbackDataEqual(CallbackAccountStatus))
 	b.bh.Handle(b.handleManagedKey, th.CallbackDataPrefix(CallbackManagedKeyPrefix))
 	b.bh.Handle(b.handleStockholmSubscription, th.CallbackDataEqual(CallbackStockholmSubscription))
 	b.bh.Handle(b.handleStockholmGuide, th.CallbackDataEqual(CallbackStockholmGuide))

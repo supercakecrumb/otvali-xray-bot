@@ -218,6 +218,11 @@ reply-keyboard launch does not supply the required signed user data. No cookie,
 local login account or frontend-selected Telegram ID is accepted. Origins are
 an additional restriction, never a replacement for authentication.
 
+When enabled, the bot adds an inline **Открыть приложение** button above its
+existing three main actions. It uses `VPN_HELP_URL` only when that URL's exact
+HTTPS origin is in `MINIAPP_ALLOWED_ORIGINS`; an empty URL leaves the launch
+button hidden. The Telegram subscription/key flow remains available.
+
 | Endpoint | JSON request | Success response |
 |---|---|---|
 | `POST /api/miniapp/session` | `{}` | `{"account":{"managed":true,"legacy_finland":true}}` |
@@ -231,6 +236,19 @@ and `legacy_finland_state` fields distinguish `ready`, `eligible_unprovisioned`
 The existing booleans remain compatible: managed access is offered when ready
 or explicitly eligible but unprovisioned; known inactive accounts are false.
 Legacy Finland is true only after a current numeric-owned active client check.
+Each session response also contains `checked_at` (RFC3339 UTC) and
+`check_scope: "account_access"`. Managed and legacy provider reads run
+independently, each with an eight-second deadline, so one outage does not erase
+the other provider's current readiness. This checks account authorization and
+provider availability; it does not test a customer's device, route, speed or
+VPN traffic. Neither check retrieves keys or creates an account.
+
+The private bot command `/status` and **Проверить доступ** action under
+**Как это работает** use this same read-only service. They show both account
+states with refresh, installation and access navigation. Refreshing status is
+never an issuance action. Existing-only Finland ownership and disabled-account
+rules apply unchanged.
+
 Issuance/listing actions
 require an explicit frontend action. Managed actions use the same bot service,
 immutable grant mapping and current approved numeric cohort; listing exposes

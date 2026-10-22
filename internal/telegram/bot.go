@@ -13,13 +13,15 @@ import (
 )
 
 type Bot struct {
-	bot        *telego.Bot
-	logger     *slog.Logger
-	db         *database.DB
-	bh         *th.BotHandler
-	sh         *x3ui.ServerHandler
-	stockholm  StockholmIssuer
-	vpnHelpURL string
+	bot           *telego.Bot
+	logger        *slog.Logger
+	db            *database.DB
+	bh            *th.BotHandler
+	sh            *x3ui.ServerHandler
+	stockholm     StockholmIssuer
+	vpnHelpURL    string
+	miniAppURL    string
+	accountStatus AccountStatusReader
 }
 
 type Option func(*Bot)

@@ -44,6 +44,14 @@ func run() int {
 		slog.Error("Invalid VPN help URL")
 		return 1
 	}
+	var miniAppOption telegram.Option
+	if cfg.MiniApp.Enabled {
+		miniAppOption, err = telegram.WithMiniAppURL(cfg.VPNHelpURL, cfg.MiniApp.AllowedOrigins)
+		if err != nil {
+			slog.Error("Invalid Mini App launch URL")
+			return 1
+		}
+	}
 
 	// Set up logger
 	log := logger.New(cfg.LogLevel)
@@ -80,7 +88,7 @@ func run() int {
 	}()
 
 	// Start the bot
-	botOptions := []telegram.Option{guideOption}
+	botOptions := []telegram.Option{guideOption, miniAppOption}
 	var managed miniapp.ManagedIssuer
 	if cfg.Stockholm.Enabled {
 		client, err := remnawave.NewClient(cfg.Stockholm)
@@ -93,6 +101,8 @@ func run() int {
 		botOptions = append(botOptions, telegram.WithStockholm(service))
 		log.Info("Stockholm subscriptions enabled", "eligible_ids", len(cfg.Stockholm.AllowedTelegramIDs))
 	}
+	accountService := miniapp.NewService(db, managed, serverHandler)
+	botOptions = append(botOptions, telegram.WithAccountStatus(accountService))
 	bot, err := telegram.NewBot(cfg.TelegramToken, log, db, serverHandler, botOptions...)
 	if err != nil {
 		log.Error("Failed to initialize bot", slog.String("error", err.Error()))
@@ -103,7 +113,7 @@ func run() int {
 	var apiServer *http.Server
 	var apiErrors <-chan error
 	if cfg.MiniApp.Enabled {
-		handler, err := miniapp.NewHandler(cfg.MiniApp, cfg.TelegramToken, miniapp.NewService(db, managed, serverHandler), pool)
+		handler, err := miniapp.NewHandler(cfg.MiniApp, cfg.TelegramToken, accountService, pool)
 		if err != nil {
 			log.Error("Invalid Mini App configuration")
 			return 1

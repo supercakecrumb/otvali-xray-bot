@@ -22,10 +22,12 @@ var (
 )
 
 type Account struct {
-	Managed            bool   `json:"managed"`
-	LegacyFinland      bool   `json:"legacy_finland"`
-	ManagedState       string `json:"managed_state,omitempty"`
-	LegacyFinlandState string `json:"legacy_finland_state,omitempty"`
+	Managed            bool      `json:"managed"`
+	LegacyFinland      bool      `json:"legacy_finland"`
+	ManagedState       string    `json:"managed_state,omitempty"`
+	LegacyFinlandState string    `json:"legacy_finland_state,omitempty"`
+	CheckedAt          time.Time `json:"checked_at"`
+	CheckScope         string    `json:"check_scope"`
 }
 type Subscription struct {
 	URL               string     `json:"url"`
