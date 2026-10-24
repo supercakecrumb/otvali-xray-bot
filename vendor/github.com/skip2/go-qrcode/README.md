@@ -53,9 +53,9 @@ Flags:
   -d	disable QR Code border
   -i	invert black and white
   -o string
-    	out PNG file prefix, empty for stdout
+        out PNG file prefix, empty for stdout
   -s int
-    	image size (pixel) (default 256)
+        image size (pixel) (default 256)
   -t	print as text-art on stdout
 
 Usage:
