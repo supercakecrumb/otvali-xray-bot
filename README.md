@@ -208,7 +208,8 @@ Users select their own access without pasting a URL or key into the bot.
 
 QR images contain the exact current subscription URL or VLESS key, generated
 inside the bot without an external QR service. The bot and Mini App share the
-same Otvali card with rounded navy modules and colored corner accents. Scan a subscription as a
+same square design: rounded deep-blue modules and teal/blue finder accents on
+a light mint-to-ice gradient, without a header or frame. Scan a subscription as a
 subscription and a VLESS key as an individual server/profile. Treat the image
 as a private credential. QR retrieval rechecks the requesting Telegram account
 and existing access; it does not rotate credentials or extend their expiry.
@@ -246,9 +247,10 @@ button hidden. The Telegram subscription/key flow remains available.
 | `POST /api/miniapp/key` | `{"id":"opaque16hex"}` or `{"id":"legacy_fi"}` | `{"key":{"id":"…","name":"…","url":"vless://…"}}` |
 
 Successful subscription and selected-key responses also include optional
-`qr_code`, a standard-base64 PNG without a data-URL prefix. The Mini App can
-show it after an explicit button press using an in-memory
-`data:image/png;base64,` image. Clear the image and its data together with the
+`qr_code`, a standard-base64 PNG without a data-URL prefix. After the user
+explicitly retrieves a subscription or selected key, the Mini App can show
+its QR automatically using an in-memory `data:image/png;base64,` image.
+Opening the Mini App still performs only the session check. Clear QR data together with the
 credential on hide, replacement or session expiry. Session and key-list
 responses never contain QR data. If a credential exceeds QR capacity, the
 field is omitted and the original text link remains available.
