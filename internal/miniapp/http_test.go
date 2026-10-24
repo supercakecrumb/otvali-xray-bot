@@ -1,23 +1,30 @@
 package miniapp
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/supercakecrumb/otvali-xray-bot/internal/qrcode"
 )
 
 const testOrigin = "https://otvali.aurorass.art"
 
 type fakeBackend struct {
-	calls    []string
-	ids      []int64
-	err      error
-	deadline bool
+	calls           []string
+	ids             []int64
+	err             error
+	deadline        bool
+	subscriptionURL string
+	keyURL          string
 }
 
 func (f *fakeBackend) record(ctx context.Context, id int64, method string) {
@@ -32,15 +39,23 @@ func (f *fakeBackend) Account(ctx context.Context, id int64) (Account, error) {
 }
 func (f *fakeBackend) Subscription(ctx context.Context, id int64) (Subscription, error) {
 	f.record(ctx, id, "subscription")
-	return Subscription{URL: "https://sub.example/private-bearer"}, f.err
+	url := f.subscriptionURL
+	if url == "" {
+		url = "https://sub.example/private-bearer"
+	}
+	return Subscription{URL: url, QRCode: "unexpected-upstream-qr"}, f.err
 }
 func (f *fakeBackend) Keys(ctx context.Context, id int64) ([]Key, error) {
 	f.record(ctx, id, "keys")
-	return []Key{{ID: "0123456789abcdef", Name: "Profile", URL: "vless://private-key@host:443"}}, f.err
+	return []Key{{ID: "0123456789abcdef", Name: "Profile", URL: "vless://private-key@host:443", QRCode: "unexpected-upstream-qr"}}, f.err
 }
 func (f *fakeBackend) Key(ctx context.Context, id int64, key string) (Key, error) {
 	f.record(ctx, id, "key")
-	return Key{ID: key, Name: "Profile", URL: "vless://private-key@host:443"}, f.err
+	url := f.keyURL
+	if url == "" {
+		url = "vless://private-key@host:443"
+	}
+	return Key{ID: key, Name: "Profile", URL: url, QRCode: "unexpected-upstream-qr"}, f.err
 }
 
 type fakeHealth struct{ err error }
@@ -80,10 +95,10 @@ func TestHTTPReadAndIssueAreExplicitAndMetadataContainsNoKeys(t *testing.T) {
 		if w.Code != 200 || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") || w.Header().Get("Access-Control-Allow-Origin") != testOrigin {
 			t.Fatal("private response/CORS policy missing")
 		}
-		if path == "session" && strings.Contains(w.Body.String(), "private") {
+		if path == "session" && (strings.Contains(w.Body.String(), "private") || strings.Contains(w.Body.String(), "qr_code")) {
 			t.Fatal("session issued/disclosed credentials")
 		}
-		if path == "keys" && (strings.Contains(w.Body.String(), "vless") || strings.Contains(w.Body.String(), "url")) {
+		if path == "keys" && (strings.Contains(w.Body.String(), "vless") || strings.Contains(w.Body.String(), "url") || strings.Contains(w.Body.String(), "qr_code") || strings.Contains(w.Body.String(), "unexpected-upstream-qr")) {
 			t.Fatal("key metadata leaked credentials")
 		}
 	}
@@ -94,6 +109,67 @@ func TestHTTPReadAndIssueAreExplicitAndMetadataContainsNoKeys(t *testing.T) {
 		if id != 42 {
 			t.Fatal("body/username selected actor")
 		}
+	}
+}
+
+func TestHTTPExplicitCredentialIncludesPNGForItsExactURL(t *testing.T) {
+	for _, action := range []string{"subscription", "key"} {
+		t.Run(action, func(t *testing.T) {
+			h, backend := newTestHandler(t)
+			backend.subscriptionURL = "https://subscriptions.example/fictional?x=1&y=2"
+			backend.keyURL = "vless://00000000-0000-4000-8000-000000000001@example.invalid:443?security=reality#Москва%20→%20Стокгольм"
+			body, want := "{}", backend.subscriptionURL
+			if action == "key" {
+				body, want = `{"id":"0123456789abcdef"}`, backend.keyURL
+			}
+			response := request(h, "/api/miniapp/"+action, body, nil)
+			var payload map[string]struct {
+				URL    string `json:"url"`
+				QRCode string `json:"qr_code"`
+			}
+			if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &payload) != nil || payload[action].URL != want {
+				t.Fatal("explicit credential response changed the original URL")
+			}
+			data, err := base64.StdEncoding.DecodeString(payload[action].QRCode)
+			if err != nil {
+				t.Fatal("QR must be plain base64 without a data URL prefix")
+			}
+			if _, err := png.Decode(bytes.NewReader(data)); err != nil {
+				t.Fatal("QR response is not a valid PNG")
+			}
+			expected, err := qrcode.PNG(want)
+			if err != nil || !bytes.Equal(data, expected) {
+				t.Fatal("QR did not encode the exact credential selected by this request")
+			}
+			if len(backend.calls) != 1 || backend.calls[0] != action || backend.ids[0] != 42 || !strings.Contains(response.Header().Get("Cache-Control"), "no-store") {
+				t.Fatal("QR must share the existing authenticated explicit credential response")
+			}
+		})
+	}
+}
+
+func TestHTTPUnencodableQROmittedWhileOriginalLinkRemainsUsable(t *testing.T) {
+	for _, action := range []string{"subscription", "key"} {
+		t.Run(action, func(t *testing.T) {
+			h, backend := newTestHandler(t)
+			backend.subscriptionURL = "https://subscriptions.example/" + strings.Repeat("x", 3000)
+			backend.keyURL = "vless://fictional@example.invalid:443?pbk=" + strings.Repeat("x", 3000)
+			body, want := "{}", backend.subscriptionURL
+			if action == "key" {
+				body, want = `{"id":"0123456789abcdef"}`, backend.keyURL
+			}
+			response := request(h, "/api/miniapp/"+action, body, nil)
+			var payload map[string]struct {
+				URL    string  `json:"url"`
+				QRCode *string `json:"qr_code"`
+			}
+			if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &payload) != nil || payload[action].URL != want {
+				t.Fatal("QR capacity failure must not truncate or remove the original credential")
+			}
+			if payload[action].QRCode != nil || strings.Contains(response.Body.String(), `"qr_code"`) || strings.Contains(response.Body.String(), "unexpected-upstream-qr") {
+				t.Fatal("failed QR generation must not return partial or unrelated upstream data")
+			}
+		})
 	}
 }
 func TestHTTPRejectsInvalidRequestsBeforeAnyBackend(t *testing.T) {

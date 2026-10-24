@@ -199,6 +199,21 @@ REALITY keys/short IDs/SNI and flow. Its current 85 Vision and three empty-flow
 credentials need compatibility qualification before changing the live listener.
 Do not infer Telegram ownership from a matching historical username.
 
+## QR codes for VPN access
+
+In a private bot chat, `/qr` opens a choice of subscription or individual key.
+`/qr_subscription` retrieves the subscription QR directly; `/qr_key` opens the
+individual-key selection. Existing credential messages also have a QR button.
+Users select their own access without pasting a URL or key into the bot.
+
+QR images contain the exact current subscription URL or VLESS key, generated
+inside the bot without an external QR service. The bot and Mini App share the
+same Otvali card with rounded navy modules and colored corner accents. Scan a subscription as a
+subscription and a VLESS key as an individual server/profile. Treat the image
+as a private credential. QR retrieval rechecks the requesting Telegram account
+and existing access; it does not rotate credentials or extend their expiry.
+When a credential is too long for QR, users can still copy the original link.
+
 ## Optional Telegram Mini App API
 
 `MINIAPP_ENABLED=false` leaves the HTTP listener closed. Enable only behind the
@@ -229,6 +244,14 @@ button hidden. The Telegram subscription/key flow remains available.
 | `POST /api/miniapp/subscription` | `{}` | `{"subscription":{"url":"…","expires_at":null,"traffic_limit_bytes":0}}` |
 | `POST /api/miniapp/keys` | `{}` | `{"keys":[{"id":"opaque16hex","name":"…"},{"id":"legacy_fi","name":"Finland, Helsinki"}]}` |
 | `POST /api/miniapp/key` | `{"id":"opaque16hex"}` or `{"id":"legacy_fi"}` | `{"key":{"id":"…","name":"…","url":"vless://…"}}` |
+
+Successful subscription and selected-key responses also include optional
+`qr_code`, a standard-base64 PNG without a data-URL prefix. The Mini App can
+show it after an explicit button press using an in-memory
+`data:image/png;base64,` image. Clear the image and its data together with the
+credential on hide, replacement or session expiry. Session and key-list
+responses never contain QR data. If a credential exceeds QR capacity, the
+field is omitted and the original text link remains available.
 
 Session checks are read-only and never create grants. Additive `managed_state`
 and `legacy_finland_state` fields distinguish `ready`, `eligible_unprovisioned`

@@ -22,6 +22,8 @@ type Bot struct {
 	vpnHelpURL    string
 	miniAppURL    string
 	accountStatus AccountStatusReader
+	qrStore       legacyQRStore
+	qrLegacy      legacyQRIssuer
 }
 
 type Option func(*Bot)
@@ -50,6 +52,12 @@ func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x
 		logger: logger,
 		db:     db,
 		sh:     serverHandler,
+	}
+	if db != nil {
+		b.qrStore = db
+	}
+	if serverHandler != nil {
+		b.qrLegacy = serverHandler
 	}
 	for _, option := range options {
 		if option != nil {

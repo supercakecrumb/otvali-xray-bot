@@ -18,6 +18,10 @@ func (b *Bot) registerCommands() {
 	b.bh.Handle(b.handleInvite, th.CommandEqual("invite"))
 
 	b.bh.Handle(b.handleGetKey, th.CommandEqual("get_key"))
+	b.bh.Handle(b.handleQR, th.CommandEqual("qr"))
+	b.bh.Handle(b.handleQRSubscription, th.CommandEqual("qr_subscription"))
+	b.bh.Handle(b.handleQRKey, th.CommandEqual("qr_key"))
+	b.bh.Handle(b.handleQRCallback, th.CallbackDataPrefix("qr_"))
 
 	// Handle callback queries from inline keyboards
 	b.bh.Handle(b.handleHelpCallback, th.CallbackDataContains("help_"))

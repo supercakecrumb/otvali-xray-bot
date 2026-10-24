@@ -130,6 +130,11 @@ github.com/savsgio/gotils/strings
 # github.com/skeema/knownhosts v1.3.0
 ## explicit; go 1.17
 github.com/skeema/knownhosts
+# github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+## explicit; go 1.13
+github.com/skip2/go-qrcode
+github.com/skip2/go-qrcode/bitset
+github.com/skip2/go-qrcode/reedsolomon
 # github.com/supercakecrumb/go-x3ui v0.0.3
 ## explicit; go 1.23.3
 github.com/supercakecrumb/go-x3ui/client
