@@ -198,8 +198,8 @@ func TestSubscriptionIsOnePrivateConciseMessage(t *testing.T) {
 		t.Fatal("private concise HTML response required")
 	}
 	got := callbacks(callKeyboard(t, caller.calls[1]))
-	if len(got) != 2 || got[0] != CallbackHelpVPNSetup || got[1] != CallbackGetKey {
-		t.Fatal("delivery must link only setup and access")
+	if len(got) != 3 || got[0] != CallbackQRSubscription || got[1] != CallbackHelpVPNSetup || got[2] != CallbackGetKey {
+		t.Fatal("delivery must offer QR, setup and access")
 	}
 	if strings.Contains(logs.String(), "private-bearer") || !strings.Contains(string(caller.calls[1].body["link_preview_options"]), `"is_disabled":true`) {
 		t.Fatal("credential logging or preview leak")

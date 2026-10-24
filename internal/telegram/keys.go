@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -232,7 +233,7 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 	keyText := legacyKeyCaption(serverName, key)
 	keyMsg.Text = keyText
 	keyMsg.ParseMode = telego.ModeMarkdownV2
-	keyMsg.ReplyMarkup = backHomeKeyboard
+	keyMsg.ReplyMarkup = qrKeyDeliveryKeyboard(CallbackQRLegacyPrefix + strconv.Itoa(serverID))
 
 	// Notify admins about successful key generation
 	b.NotifyAdminsOfKeyRequest(username, chatID, serverName, true, "")

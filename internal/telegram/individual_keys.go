@@ -112,7 +112,7 @@ func (b *Bot) handleManagedKey(bot *telego.Bot, update telego.Update) {
 			continue
 		}
 		text := "<b>" + html.EscapeString(key.Name) + "</b>\n\n<code>" + html.EscapeString(key.URL) + "</code>\n\nДобавьте полный vless:// ключ в Happ или INCY как сервер.\nУстановка: /help_setup. Ключ никому не передавайте."
-		b.editStockholmMessage(bot, update, text, backHomeKeyboard)
+		b.editStockholmMessage(bot, update, text, qrKeyDeliveryKeyboard(CallbackQRManagedPrefix+id))
 		return
 	}
 	b.managedKeyUnavailable(bot, update)

@@ -2,6 +2,7 @@ package miniapp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/supercakecrumb/otvali-xray-bot/internal/qrcode"
 )
 
 var (
@@ -31,13 +34,15 @@ type Account struct {
 }
 type Subscription struct {
 	URL               string     `json:"url"`
+	QRCode            string     `json:"qr_code,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at"`
 	TrafficLimitBytes int64      `json:"traffic_limit_bytes"`
 }
 type Key struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	URL  string `json:"url,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	URL    string `json:"url,omitempty"`
+	QRCode string `json:"qr_code,omitempty"`
 }
 type Backend interface {
 	Account(context.Context, int64) (Account, error)
@@ -202,6 +207,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeBackendError(w, err)
 			return
 		}
+		sub.QRCode = credentialQRCode(sub.URL)
 		writeJSON(w, 200, map[string]Subscription{"subscription": sub})
 	case "/api/miniapp/keys":
 		keys, err := h.backend.Keys(ctx, actorID)
@@ -212,6 +218,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Enforce metadata-only output even if an implementation returns a URL.
 		for i := range keys {
 			keys[i].URL = ""
+			keys[i].QRCode = ""
 		}
 		if keys == nil {
 			keys = []Key{}
@@ -223,8 +230,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeBackendError(w, err)
 			return
 		}
+		key.QRCode = credentialQRCode(key.URL)
 		writeJSON(w, 200, map[string]Key{"key": key})
 	}
+}
+
+// The QR is an additional representation of an explicitly requested credential.
+// Encoding failure leaves its original link usable and never reaches a log.
+func credentialQRCode(raw string) string {
+	data, err := qrcode.PNG(raw)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(data)
 }
 
 func (h *handler) allow(id int64) bool {

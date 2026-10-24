@@ -71,7 +71,7 @@ func (b *Bot) handleStockholmSubscription(bot *telego.Bot, update telego.Update)
 }
 
 func subscriptionDeliveryKeyboard() *telego.InlineKeyboardMarkup {
-	return tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("⚙️ Установка VPN").WithCallbackData(CallbackHelpVPNSetup)), tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Получить VPN").WithCallbackData(CallbackGetKey)))
+	return tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("QR-код подписки").WithCallbackData(CallbackQRSubscription)), tu.InlineKeyboardRow(tu.InlineKeyboardButton("⚙️ Установка VPN").WithCallbackData(CallbackHelpVPNSetup)), tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Получить VPN").WithCallbackData(CallbackGetKey)))
 }
 
 // Saved messages from earlier releases lead to the same installation screen.
