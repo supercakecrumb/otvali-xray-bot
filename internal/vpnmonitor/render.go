@@ -131,10 +131,7 @@ func RenderRoute(s Snapshot, id string, owner bool) string {
 			if c.State == "ok" {
 				result = fmt.Sprintf("ответ %d мс", c.LatencyMS)
 			} else if c.State == "fail" {
-				result = "не отвечает"
-				if c.HTTPStatus > 0 {
-					result = fmt.Sprintf("HTTP %d", c.HTTPStatus)
-				}
+				result = checkFailureText(c)
 			}
 			b.WriteString(icon(mapCheck(c.State)) + " " + CheckLabels[c.ID] + " — " + result + "\n")
 		}
@@ -144,6 +141,50 @@ func RenderRoute(s Snapshot, id string, owner bool) string {
 	}
 	b.WriteString("\nЭто время ответа тестового запроса, не скорость загрузки. Замер относится к проверочной конфигурации.")
 	return b.String()
+}
+
+// Error codes are fixed collector categories, never raw server/client errors.
+// A successful HTTP response can still fail content or exit verification.
+func checkFailureText(c Check) string {
+	switch c.ErrorCode {
+	case "exit_mismatch":
+		return "выход через другой сервер"
+	case "timeout":
+		return "истекло время ожидания"
+	case "dns_failed":
+		return "ошибка DNS"
+	case "tls_failed":
+		return "ошибка TLS"
+	case "connection_failed":
+		return "не удалось подключиться"
+	case "request_failed":
+		return "не удалось выполнить запрос"
+	case "exit_response_invalid":
+		return "не удалось проверить выход"
+	case "exit_expectation_missing":
+		return "проверка выхода не настроена"
+	case "subscription_invalid":
+		return "подписка не читается"
+	case "subscription_unavailable":
+		return "подписка недоступна"
+	case "profile_invalid":
+		return "конфигурация не читается"
+	case "profile_unavailable", "legacy_config_unavailable":
+		return "конфигурация недоступна для проверки"
+	case "client_start_failed", "client_stopped", "client_unavailable":
+		return "не удалось запустить проверочное соединение"
+	case "source_route_changed":
+		return "подключение проверочного сервера изменилось"
+	case "probe_error":
+		return "ошибка проверки"
+	case "unexpected_http":
+		if c.HTTPStatus >= 100 {
+			return fmt.Sprintf("неожиданный ответ HTTP %d", c.HTTPStatus)
+		}
+		return "неожиданный ответ сервиса"
+	default:
+		return "проверка не пройдена"
+	}
 }
 func mapCheck(state string) string {
 	if state == "fail" {
