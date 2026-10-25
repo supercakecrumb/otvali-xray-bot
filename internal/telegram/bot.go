@@ -1,8 +1,10 @@
 package telegram
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -13,17 +15,21 @@ import (
 )
 
 type Bot struct {
-	bot           *telego.Bot
-	logger        *slog.Logger
-	db            *database.DB
-	bh            *th.BotHandler
-	sh            *x3ui.ServerHandler
-	stockholm     StockholmIssuer
-	vpnHelpURL    string
-	miniAppURL    string
-	accountStatus AccountStatusReader
-	qrStore       legacyQRStore
-	qrLegacy      legacyQRIssuer
+	bot               *telego.Bot
+	logger            *slog.Logger
+	db                *database.DB
+	bh                *th.BotHandler
+	sh                *x3ui.ServerHandler
+	stockholm         StockholmIssuer
+	vpnHelpURL        string
+	miniAppURL        string
+	accountStatus     AccountStatusReader
+	qrStore           legacyQRStore
+	qrLegacy          legacyQRIssuer
+	networkStatus     NetworkStatusReader
+	monitorOwnerID    int64
+	monitorOwnerCheck func(context.Context, int64) bool
+	monitorBot        *telego.Bot
 }
 
 type Option func(*Bot)
@@ -62,6 +68,12 @@ func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x
 	for _, option := range options {
 		if option != nil {
 			option(b)
+		}
+	}
+	if b.networkStatus != nil {
+		b.monitorBot, err = telego.NewBot(token, telego.WithHTTPClient(&http.Client{Timeout: 15 * time.Second}), telego.WithLogger(telegramAPILogger{logger: logger}))
+		if err != nil {
+			return nil, err
 		}
 	}
 	return b, nil

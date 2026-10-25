@@ -17,6 +17,7 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/runtimehealth"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/telegram"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/vpnmonitor"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/x3ui"
 	"github.com/supercakecrumb/otvali-xray-bot/pkg/config"
 	"github.com/supercakecrumb/otvali-xray-bot/pkg/logger"
@@ -103,6 +104,20 @@ func run() int {
 	}
 	accountService := miniapp.NewService(db, managed, serverHandler)
 	botOptions = append(botOptions, telegram.WithAccountStatus(accountService))
+	var monitor *vpnmonitor.Service
+	if cfg.VPNMonitor.Enabled {
+		owner, ownerErr := db.IsUserAdmin(cfg.VPNMonitor.AlertChatID)
+		if ownerErr != nil || !owner {
+			log.Error("VPN monitor owner must be a bound administrator")
+			return 1
+		}
+		monitor, err = vpnmonitor.NewService(db.Conn, cfg.VPNMonitor)
+		if err != nil {
+			log.Error("VPN monitor initialization failed")
+			return 1
+		}
+		botOptions = append(botOptions, telegram.WithNetworkStatus(monitor, cfg.VPNMonitor.AlertChatID))
+	}
 	bot, err := telegram.NewBot(cfg.TelegramToken, log, db, serverHandler, botOptions...)
 	if err != nil {
 		log.Error("Failed to initialize bot", slog.String("error", err.Error()))
@@ -117,6 +132,12 @@ func run() int {
 		if err != nil {
 			log.Error("Invalid Mini App configuration")
 			return 1
+		}
+		if monitor != nil {
+			mux := http.NewServeMux()
+			mux.Handle("/api/monitor/report", monitor.Handler())
+			mux.Handle("/", handler)
+			handler = mux
 		}
 		listener, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(cfg.MiniApp.Port)))
 		if err != nil {
@@ -142,6 +163,13 @@ func run() int {
 		defer close(healthDone)
 		runtimehealth.Monitor(ctx, pool, runtimehealth.Path, log)
 	}()
+	monitorDone := make(chan struct{})
+	if monitor != nil {
+		go func() { defer close(monitorDone); monitor.Run(ctx, bot.SendMonitorAlert, log) }()
+		log.Info("VPN connection monitoring enabled")
+	} else {
+		close(monitorDone)
+	}
 
 	// Start the bot in a separate goroutine
 	botDone := make(chan struct{})
@@ -174,6 +202,7 @@ func run() int {
 		cancel()
 	}
 	<-healthDone
+	<-monitorDone
 	log.Info("Shutting down gracefully...")
 	return exitCode
 }

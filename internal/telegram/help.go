@@ -85,6 +85,9 @@ func (b *Bot) mainMenuKeyboard() *telego.InlineKeyboardMarkup {
 	if b.miniAppURL != "" {
 		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Открыть приложение").WithWebApp(&telego.WebAppInfo{URL: b.miniAppURL})))
 	}
+	if b.networkStatus != nil {
+		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Состояние VPN").WithCallbackData(CallbackNetworkStatus)))
+	}
 	return tu.InlineKeyboard(append(rows, helpKeyboard.InlineKeyboard...)...)
 }
 
