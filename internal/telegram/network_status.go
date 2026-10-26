@@ -31,6 +31,18 @@ func (b *Bot) isMonitorOwner(ctx context.Context, id int64) bool {
 	if b.monitorOwnerCheck != nil {
 		return b.monitorOwnerCheck(ctx, id)
 	}
+	return b.isMonitorAdmin(ctx, id)
+}
+
+// Diagnostics may be read by bound administrators. Notification delivery still
+// requires the separately configured owner ID in isMonitorOwner.
+func (b *Bot) isMonitorAdmin(ctx context.Context, id int64) bool {
+	if id <= 0 || ctx.Err() != nil {
+		return false
+	}
+	if b.monitorAdminCheck != nil {
+		return b.monitorAdminCheck(ctx, id)
+	}
 	if b.db == nil || b.db.Conn == nil {
 		return false
 	}
@@ -48,11 +60,11 @@ func (b *Bot) networkStatusText(actor int64, route string) string {
 	if err != nil {
 		return "<b>Состояние VPN</b>\n\n⚪ Сейчас не удалось получить результаты. Доступность неизвестна; попробуйте позже."
 	}
-	owner := b.isMonitorOwner(ctx, actor)
+	admin := b.isMonitorAdmin(ctx, actor)
 	if route != "" {
-		return vpnmonitor.RenderRoute(s, route, owner)
+		return vpnmonitor.RenderRoute(s, route, admin)
 	}
-	return vpnmonitor.RenderOverview(s, owner)
+	return vpnmonitor.RenderOverview(s, admin)
 }
 
 func networkStatusKeyboard(details bool, route string) *telego.InlineKeyboardMarkup {

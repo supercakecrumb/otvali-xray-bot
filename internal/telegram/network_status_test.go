@@ -15,13 +15,41 @@ type fakeNetworkReader struct {
 	calls    int
 	deadline bool
 	err      error
+	snapshot vpnmonitor.Snapshot
 }
 
 func (f *fakeNetworkReader) Snapshot(ctx context.Context) (vpnmonitor.Snapshot, error) {
 	f.calls++
 	d, ok := ctx.Deadline()
 	f.deadline = ok && time.Until(d) <= 4*time.Second
-	return vpnmonitor.Snapshot{}, f.err
+	return f.snapshot, f.err
+}
+
+func TestPrivateServiceVisibilityRequiresCurrentBoundAdmin(t *testing.T) {
+	for _, mode := range []string{"ordinary", "admin", "owner_revoked", "missing_db", "negative_actor"} {
+		t.Run(mode, func(t *testing.T) {
+			b, _, _ := stockholmTestBot(t, nil)
+			reader := &fakeNetworkReader{snapshot: vpnmonitor.Snapshot{Available: true, Report: vpnmonitor.Report{CheckedAt: time.Now(), Routes: []vpnmonitor.Route{{ID: "stockholm", Kind: "vpn", Checks: []vpnmonitor.Check{{ID: "ru-yandex", Category: "ru", State: "ok"}, {ID: "world-google", Category: "world", State: "ok"}, {ID: "own-home-assistant", Category: "own", State: "fail", ErrorCode: "timeout"}}}}}}}
+			WithNetworkStatus(reader, 42)(b)
+			id := int64(99)
+			if mode == "owner_revoked" {
+				id = 42
+			}
+			if mode == "negative_actor" {
+				id = -99
+			}
+			if mode != "missing_db" {
+				b.monitorAdminCheck = func(_ context.Context, actor int64) bool { return mode == "admin" && actor == 99 }
+			}
+			text := b.networkStatusText(id, "stockholm")
+			if strings.Contains(text, "Home Assistant") != (mode == "admin") {
+				t.Fatal("private diagnostics visibility escaped bound-admin check")
+			}
+			if mode == "admin" && b.isMonitorOwner(context.Background(), id) {
+				t.Fatal("diagnostic admin became alert owner")
+			}
+		})
+	}
 }
 
 func TestNetworkStatusCallbacksArePrivateCachedAndReadOnly(t *testing.T) {

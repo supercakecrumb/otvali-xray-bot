@@ -39,12 +39,17 @@ func LoadConfig(get func(string) string) (Config, error) {
 }
 
 type Check struct {
-	ID         string `json:"id"`
-	Category   string `json:"category"`
-	State      string `json:"state"`
-	LatencyMS  int    `json:"latency_ms"`
-	HTTPStatus int    `json:"http_status"`
-	ErrorCode  string `json:"error_code"`
+	ID            string `json:"id"`
+	Category      string `json:"category"`
+	State         string `json:"state"`
+	LatencyMS     int    `json:"latency_ms"`
+	HTTPStatus    int    `json:"http_status"`
+	ErrorCode     string `json:"error_code"`
+	BytesReceived int    `json:"bytes_received,omitempty"`
+	BytesSent     int    `json:"bytes_sent,omitempty"`
+	Attempts      int    `json:"attempts,omitempty"`
+	Successes     int    `json:"successes,omitempty"`
+	VerifiedBody  bool   `json:"verified_body,omitempty"`
 }
 type Route struct {
 	ID     string  `json:"id"`
@@ -76,19 +81,53 @@ var Categories = []string{"ru", "world", "own"}
 var CategoryLabels = map[string]string{"ru": "Россия", "world": "Зарубежные сайты", "own": "Наши сервисы"}
 var CheckCategory = map[string]string{
 	"ru-yandex": "ru", "ru-vk": "ru", "world-cloudflare": "world", "world-google": "world", "world-exit": "world",
+	"world-youtube": "world", "world-telegram": "world", "world-download": "world", "world-upload": "world",
 	"own-guide": "own", "own-api": "own", "own-subscription": "own", "own-home-assistant": "own",
 	"own-home-dokploy": "own", "own-jellyfin": "own", "own-qbit": "own",
 }
 var CheckLabels = map[string]string{
 	"ru-yandex": "Яндекс", "ru-vk": "VK", "world-cloudflare": "Cloudflare", "world-google": "Google", "world-exit": "Выход в интернет",
+	"world-youtube": "YouTube · сайт и обложки", "world-telegram": "Telegram · MTProto", "world-download": "Получение данных", "world-upload": "Отправка данных",
 	"own-guide": "Инструкция", "own-api": "API Otvali", "own-subscription": "Подписка", "own-home-assistant": "Home Assistant",
 	"own-home-dokploy": "Домашняя панель", "own-jellyfin": "Медиатека", "own-qbit": "Загрузки",
 }
 var safeError = regexp.MustCompile(`^[a-z0-9_]{0,48}$`)
 
+func versionTwoCheck(id string) bool {
+	switch id {
+	case "world-youtube", "world-telegram", "world-download", "world-upload":
+		return true
+	}
+	return false
+}
+
+func validateTransfer(c Check, version int) bool {
+	if c.BytesReceived < 0 || c.BytesReceived > 10*1024*1024 || c.BytesSent < 0 || c.BytesSent > 10*1024*1024 || c.Attempts < 0 || c.Attempts > 10 || c.Successes < 0 || c.Successes > c.Attempts {
+		return false
+	}
+	if version == 1 {
+		return c.BytesReceived == 0 && c.BytesSent == 0 && c.Attempts == 0 && c.Successes == 0 && !c.VerifiedBody
+	}
+	if c.State == "unknown" {
+		return c.Attempts == 0 && c.Successes == 0 && !c.VerifiedBody
+	}
+	if c.Attempts == 0 || (c.State == "ok" && c.Successes != c.Attempts) || (c.State == "fail" && c.Successes == c.Attempts) {
+		return false
+	}
+	if c.VerifiedBody && (c.Successes == 0 || c.BytesReceived == 0) {
+		return false
+	}
+	// These checks claim delivery of actual application data, not merely headers.
+	return c.State != "ok" || !versionTwoCheck(c.ID) || c.VerifiedBody
+}
+
 func Validate(r Report, now time.Time) error {
-	if r.Version != 1 || r.Source != Source || r.IntervalSeconds != Interval || r.CheckedAt.IsZero() || r.CheckedAt.Before(now.Add(-10*time.Minute)) || r.CheckedAt.After(now.Add(time.Minute)) || len(r.Routes) != len(RouteOrder) {
+	if (r.Version != 1 && r.Version != 2) || r.Source != Source || r.IntervalSeconds != Interval || r.CheckedAt.IsZero() || r.CheckedAt.Before(now.Add(-10*time.Minute)) || r.CheckedAt.After(now.Add(time.Minute)) || len(r.Routes) != len(RouteOrder) {
 		return ErrInvalid
+	}
+	checkCount := 12
+	if r.Version == 2 {
+		checkCount = len(CheckCategory)
 	}
 	seen := map[string]bool{}
 	for _, route := range r.Routes {
@@ -97,7 +136,7 @@ func Validate(r Report, now time.Time) error {
 		if route.ID == "direct" {
 			kind = "direct"
 		}
-		if !ok || seen[route.ID] || route.Kind != kind || len(route.Label) > 120 || len(route.Checks) != len(CheckCategory) {
+		if !ok || seen[route.ID] || route.Kind != kind || len(route.Label) > 120 || len(route.Checks) != checkCount {
 			return ErrInvalid
 		}
 		if route.State != "ok" && route.State != "degraded" && route.State != "down" && route.State != "unknown" {
@@ -107,7 +146,7 @@ func Validate(r Report, now time.Time) error {
 		checks := map[string]bool{}
 		for _, c := range route.Checks {
 			category, ok := CheckCategory[c.ID]
-			if !ok || checks[c.ID] || c.Category != category || (c.State != "ok" && c.State != "fail" && c.State != "unknown") || c.LatencyMS < 0 || c.LatencyMS > 120000 || c.HTTPStatus < 0 || c.HTTPStatus > 599 || !safeError.MatchString(c.ErrorCode) {
+			if !ok || checks[c.ID] || (r.Version == 1 && versionTwoCheck(c.ID)) || c.Category != category || (c.State != "ok" && c.State != "fail" && c.State != "unknown") || c.LatencyMS < 0 || c.LatencyMS > 120000 || c.HTTPStatus < 0 || c.HTTPStatus > 599 || !safeError.MatchString(c.ErrorCode) || !validateTransfer(c, r.Version) {
 				return ErrInvalid
 			}
 			checks[c.ID] = true

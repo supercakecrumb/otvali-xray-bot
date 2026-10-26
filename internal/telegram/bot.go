@@ -29,6 +29,7 @@ type Bot struct {
 	networkStatus     NetworkStatusReader
 	monitorOwnerID    int64
 	monitorOwnerCheck func(context.Context, int64) bool
+	monitorAdminCheck func(context.Context, int64) bool
 	monitorBot        *telego.Bot
 }
 

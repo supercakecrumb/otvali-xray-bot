@@ -388,7 +388,7 @@ func TestPublicStatusHidesPrivateChecksAndDoesNotConfuseServicesWithInternet(t *
 	setCheck(&r, "stockholm", "own-home-assistant", "fail")
 	s := Snapshot{Available: true, Report: r}
 	text := RenderOverview(s, false) + RenderRoute(s, "stockholm", false)
-	for _, private := range []string{"Home Assistant", "Домашняя панель", "Медиатека", "Загрузки", "домашнего", "private-home-name", "<script>", "Проблема отдельного"} {
+	for _, private := range []string{"Home Assistant", "Домашняя панель", "Медиатека", "Загрузки", "домашнего", "private-home-name", "<script>", "Проблема отдельного", "Сервисы", "сервисов", "Наши сервисы", "API Otvali", "Инструкция", "Подписка"} {
 		if strings.Contains(text, private) {
 			t.Fatalf("public status exposed private signal %s", private)
 		}
@@ -404,8 +404,8 @@ func TestPublicStatusHidesPrivateChecksAndDoesNotConfuseServicesWithInternet(t *
 	}
 	s.Report = r
 	text = RenderOverview(s, false) + RenderRoute(s, "stockholm", false)
-	if !strings.Contains(text, "Интернет работает через все маршруты") || !strings.Contains(text, "проблема касается отдельных сервисов") {
-		t.Fatal("shared service failure must not become a VPN outage")
+	if !strings.Contains(text, "Интернет работает через все маршруты") || strings.Contains(text, "сервисов") || strings.Contains(text, "Инструкция") {
+		t.Fatal("private service failure must not alter the public view")
 	}
 	s.Stale = true
 	text = RenderOverview(s, false) + RenderRoute(s, "stockholm", false)

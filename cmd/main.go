@@ -136,6 +136,7 @@ func run() int {
 		if monitor != nil {
 			mux := http.NewServeMux()
 			mux.Handle("/api/monitor/report", monitor.Handler())
+			mux.Handle("/api/monitor/transfer/", vpnmonitor.NewTransferHandler(cfg.VPNMonitor.Secret))
 			mux.Handle("/", handler)
 			handler = mux
 		}

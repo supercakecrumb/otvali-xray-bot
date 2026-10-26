@@ -7,17 +7,19 @@ import (
 	"time"
 )
 
-func PublicRoute(route Route, owner bool) Route {
-	if owner {
+func PublicRoute(route Route, admin bool) Route {
+	if admin {
 		return route
 	}
 	copy := route
 	copy.Checks = nil
 	for _, c := range route.Checks {
-		if c.Category != "own" || c.ID == "own-guide" || c.ID == "own-api" || c.ID == "own-subscription" {
+		if c.Category != "own" {
 			copy.Checks = append(copy.Checks, c)
 		}
 	}
+	// Never retain a hidden service failure in the public aggregate.
+	copy.State = NetworkState(copy)
 	return copy
 }
 func icon(state string) string {
@@ -58,7 +60,7 @@ func RenderOverview(s Snapshot, owner bool) string {
 				good++
 			}
 		}
-		if CategoryState(r, "own") != "ok" {
+		if owner && CategoryState(r, "own") != "ok" {
 			serviceIssues = true
 		}
 	}
@@ -77,11 +79,11 @@ func RenderOverview(s Snapshot, owner bool) string {
 			}
 		}
 	}
-	label := "Сервисы Otvali"
+	heading := "Россия · Мир"
 	if owner {
-		label = "Наши сервисы"
+		heading += " · Наши сервисы"
 	}
-	b.WriteString("\n<b>Россия · Мир · " + label + "</b>\n")
+	b.WriteString("\n<b>" + heading + "</b>\n")
 	for _, id := range RouteOrder {
 		r, ok := routes[id]
 		if !ok {
@@ -90,9 +92,13 @@ func RenderOverview(s Snapshot, owner bool) string {
 		if id == "direct" {
 			b.WriteString("\n")
 		}
-		b.WriteString(fmt.Sprintf("%s %s %s  %s\n", icon(CategoryState(r, "ru")), icon(CategoryState(r, "world")), icon(CategoryState(r, "own")), RouteLabels[id]))
+		states := icon(CategoryState(r, "ru")) + " " + icon(CategoryState(r, "world"))
+		if owner {
+			states += " " + icon(CategoryState(r, "own"))
+		}
+		b.WriteString(states + "  " + RouteLabels[id] + "\n")
 	}
-	b.WriteString("\n🟢 работает · 🟡 частично · 🔴 недоступно · ⚪ нет данных")
+	b.WriteString("\n🟢 работает · 🟡 частично · 🔴 недоступно · ⚪ замер не выполнен")
 	if serviceIssues {
 		b.WriteString("\n\nПроблема отдельного сервиса не означает, что VPN отключён. Подробнее — в карточке маршрута.")
 	}
@@ -118,29 +124,69 @@ func RenderRoute(s Snapshot, id string, owner bool) string {
 	var b strings.Builder
 	b.WriteString("<b>" + html.EscapeString(RouteLabels[id]) + "</b>\n" + checkedAt(s.Report, owner) + "\n")
 	for _, category := range Categories {
-		label := CategoryLabels[category]
 		if category == "own" && !owner {
-			label = "Сервисы Otvali"
+			continue
 		}
+		label := CategoryLabels[category]
 		b.WriteString("\n<b>" + label + "</b>\n")
 		for _, c := range selected.Checks {
 			if c.Category != category {
 				continue
 			}
-			result := "нет данных"
+			result := checkUnknownText(c)
 			if c.State == "ok" {
 				result = fmt.Sprintf("ответ %d мс", c.LatencyMS)
+				if c.VerifiedBody {
+					result = fmt.Sprintf("данные проверены · %d мс", c.LatencyMS)
+				}
 			} else if c.State == "fail" {
 				result = checkFailureText(c)
+			}
+			if c.Attempts > 0 {
+				if c.BytesSent > 0 {
+					result += fmt.Sprintf(" · ↑ %s", formatBytes(c.BytesSent))
+				}
+				if c.BytesReceived > 0 {
+					result += fmt.Sprintf(" · ↓ %s", formatBytes(c.BytesReceived))
+				}
+				if c.Attempts > 1 {
+					result += fmt.Sprintf(" · %d/%d запросов", c.Successes, c.Attempts)
+				}
 			}
 			b.WriteString(icon(mapCheck(c.State)) + " " + CheckLabels[c.ID] + " — " + result + "\n")
 		}
 	}
-	if NetworkState(*selected) == "ok" && CategoryState(*selected, "own") != "ok" {
+	if owner && NetworkState(*selected) == "ok" && CategoryState(*selected, "own") != "ok" {
 		b.WriteString("\nИнтернет через маршрут работает; проблема касается отдельных сервисов.\n")
 	}
-	b.WriteString("\nЭто время ответа тестового запроса, не скорость загрузки. Замер относится к проверочной конфигурации.")
+	if s.Report.Version >= 2 {
+		b.WriteString("\n↑ отправлено · ↓ получено. Проверены ответы приложений и целостность тестовых данных. YouTube: сайт и обложки; Telegram: начальный обмен MTProto. Воспроизведение видео, звонки и потери IP-пакетов здесь не измеряются.")
+	}
+	b.WriteString("\n\nВремя указано для тестового запроса. Замер относится к проверочной конфигурации, не ко всем устройствам.")
 	return b.String()
+}
+
+func formatBytes(n int) string {
+	if n >= 1024*1024 {
+		return fmt.Sprintf("%.1f МиБ", float64(n)/(1024*1024))
+	}
+	if n >= 1024 {
+		return fmt.Sprintf("%.1f КиБ", float64(n)/1024)
+	}
+	return fmt.Sprintf("%d Б", n)
+}
+
+func checkUnknownText(c Check) string {
+	switch c.ErrorCode {
+	case "probe_budget_exhausted":
+		return "проверка не выполнена: исчерпан лимит времени"
+	case "collection_budget_exhausted":
+		return "проверка не выполнена: общий замер прерван по времени"
+	case "", "not_attempted":
+		return "проверка ещё не выполнена"
+	default:
+		return "проверка не выполнена: " + checkFailureText(c)
+	}
 }
 
 // Error codes are fixed collector categories, never raw server/client errors.
@@ -182,6 +228,14 @@ func checkFailureText(c Check) string {
 			return fmt.Sprintf("неожиданный ответ HTTP %d", c.HTTPStatus)
 		}
 		return "неожиданный ответ сервиса"
+	case "response_invalid", "body_invalid", "content_invalid", "body_mismatch":
+		return "содержимое ответа не прошло проверку"
+	case "transfer_incomplete":
+		return "данные получены не полностью"
+	case "transfer_mismatch", "integrity_failed":
+		return "данные не совпали с отправленными"
+	case "protocol_invalid", "telegram_protocol_invalid":
+		return "неверный ответ протокола"
 	default:
 		return "проверка не пройдена"
 	}

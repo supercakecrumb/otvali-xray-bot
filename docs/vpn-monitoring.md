@@ -9,20 +9,28 @@ account-access behavior.
 ## User experience
 
 `/status` and **Состояние VPN** show the last stored connection results, the
-timestamp in Moscow time, and three categories: Russia, foreign internet, and
-Otvali services. **Подробнее по маршрутам** opens a short card for a chosen route.
+timestamp in Moscow time, and two public categories: Russia and foreign internet.
+Bound administrators also see the private services category. **Подробнее по маршрутам** opens a short card for a chosen route.
 **Обновить статус** reloads the stored result; it never starts another probe.
 
-The public view says **Проверка из России**. It shows only the guide, API and
-subscription checks in its services category. Home Assistant, the home management
-panel, media and downloads checks are visible only to the explicitly configured
-owner, while that Telegram ID remains a bound administrator. Their failures do
-not change the public services summary. Reports contain no raw URLs, addresses,
+The public view says **Проверка из России**. All own-service checks—including
+the guide, API and subscription—are hidden from ordinary users. Home Assistant,
+the home management panel, media and downloads are visible only after checking
+the requesting Telegram ID is currently a bound administrator. The complete
+private category is removed before public rendering; its checks, summary icons,
+counts and failure hints cannot alter the public result. Alert delivery remains
+limited to the separately configured owner; reading admin diagnostics does not
+subscribe an administrator to alerts. Reports contain no raw URLs, addresses,
 subscription links, VPN credentials or Telegram identities.
 
 The test is one vantage point and one dedicated configuration per route. A green
 status is not a claim that every customer's device or provider is working. The
-reported duration is HTTP response time, not bandwidth or a speed test.
+reported duration is application response time, not bandwidth or a speed test.
+Version 2 reports actual sent/received byte counts and verifies complete test
+payloads. YouTube covers the website and a thumbnail; Telegram covers an initial
+MTProto exchange. These do not prove video playback, calls or raw IP packet-loss
+percentages. Unattempted checks display the concrete collection/setup reason;
+old results are never silently carried forward as fresh.
 
 ## Receiver and contract
 
@@ -44,7 +52,7 @@ JSON fields:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "source": "home-assistant",
   "checked_at": "2026-10-26T12:00:00Z",
   "interval_seconds": 300,
@@ -54,7 +62,7 @@ JSON fields:
       "kind": "vpn",
       "state": "ok",
       "checks": [
-        {"id": "ru-yandex", "category": "ru", "state": "ok", "latency_ms": 45, "http_status": 200, "error_code": ""}
+        {"id": "ru-yandex", "category": "ru", "state": "ok", "latency_ms": 45, "http_status": 200, "error_code": "", "attempts": 1, "successes": 1, "bytes_received": 1200, "bytes_sent": 0, "verified_body": true}
       ]
     }
   ]
@@ -62,7 +70,9 @@ JSON fields:
 ```
 
 The example above is abbreviated. Every report must contain **all six routes**
-and **all twelve checks per route**, without duplicate or unknown IDs:
+and **all sixteen checks per route** for version 2, without duplicate or unknown
+IDs. Version 1 remains accepted with its exact original twelve checks and no
+transfer fields, so the receiver can be deployed before the collector:
 
 | Route ID | Kind |
 | --- | --- |
@@ -77,8 +87,9 @@ and **all twelve checks per route**, without duplicate or unknown IDs:
 | --- | --- | --- |
 | ru-yandex, ru-vk | ru | Everyone |
 | world-cloudflare, world-google, world-exit | world | Everyone |
-| own-guide, own-api, own-subscription | own | Everyone |
-| own-home-assistant, own-home-dokploy, own-jellyfin, own-qbit | own | Owner only |
+| world-youtube, world-telegram, world-download, world-upload (v2 only) | world | Everyone |
+| own-guide, own-api, own-subscription | own | Bound admins only |
+| own-home-assistant, own-home-dokploy, own-jellyfin, own-qbit | own | Bound admins only |
 
 Check states are `ok`, `fail`, `unknown`. Route state is a compatibility field
 with `ok`, `degraded`, `down`, `unknown`; the receiver recomputes every displayed
@@ -89,6 +100,13 @@ must be present when configuration, source routing, or collection is unavailable
 `world-exit` verifies that the observed exit matches the intended route without
 including the address in the report.
 
+Version 2 adds `bytes_received` and `bytes_sent` (0–10 MiB each), `attempts` and
+`successes` (0–10, successes never above attempts), and `verified_body`. Known
+checks require an attempt; successful checks require all attempts to succeed.
+Unknown checks have no attempts. Verified application data requires received
+bytes and at least one successful attempt. The four new application/transfer
+checks cannot be green without verified response content.
+
 Bodies are limited to 96 KiB and two concurrent receiver requests. Unknown JSON
 fields, missing matrix entries, queries and wrong methods are rejected. A report
 timestamp must be no more than ten minutes old or one minute in the future. The
@@ -97,6 +115,29 @@ return 409. New observations must be at least four minutes apart so retrying
 cannot confirm an incident. Preserve the same `checked_at` and body on retries;
 the authentication timestamp can change. Successful acceptance returns 200 and
 `{"ok":true}`. The receiver never returns observations or raw error payloads.
+
+## Bounded bidirectional data check
+
+With monitoring enabled, `POST /api/monitor/transfer/download` and
+`POST /api/monitor/transfer/upload` accept only authenticated synthetic data.
+Both require `Content-Type: application/octet-stream`, the same timestamp limits
+as reports, and a domain-separated signature:
+`HMAC-SHA256(secret, timestamp + "\n" + path + "\n" + exact body)`.
+A report signature cannot authorize a transfer. No query parameters, arbitrary
+sizes, destinations, files or customer content are accepted.
+
+- Download accepts exactly 32 random nonce bytes. It returns exactly 262144 bytes:
+  `SHA256(b"OtvaliProbe/2.0\n" + nonce)` repeated 8192 times. The collector checks
+  the complete payload against that expectation.
+- Upload accepts exactly 65536 synthetic bytes. It returns only a JSON receipt
+  with `size` and the hexadecimal `sha256` of the received body. The collector
+  checks both, proving that the server received the entire upload.
+
+The handler permits six concurrent requests and an authenticated token bucket
+of twelve requests with one token replenished per second. Replay therefore cannot
+create unbounded bandwidth amplification. Responses are `no-store`; bodies,
+headers and hashes are not logged or stored. The probes measure the selected
+VPN path to this controlled endpoint, not every destination on the internet.
 
 ## Incidents and delivery
 
