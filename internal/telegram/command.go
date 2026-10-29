@@ -14,6 +14,7 @@ func (b *Bot) registerCommands() {
 	b.bh.Handle(b.handleStart, th.CommandEqual("start"))
 	b.bh.Handle(b.handleHelp, th.CommandEqual("help"))
 	b.bh.Handle(b.handleHelpSetup, th.CommandEqual("help_setup"))
+	b.bh.Handle(b.handleBeta, th.CommandEqual("beta"))
 	b.bh.Handle(b.handleStatus, th.CommandEqual("status"))
 	b.bh.Handle(b.handleAccountStatus, th.CommandEqual("account"))
 	b.bh.Handle(b.handleInvite, th.CommandEqual("invite"))

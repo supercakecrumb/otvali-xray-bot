@@ -83,7 +83,10 @@ func WithMiniAppURL(raw string, allowedOrigins []string) (Option, error) {
 func (b *Bot) mainMenuKeyboard() *telego.InlineKeyboardMarkup {
 	var rows [][]telego.InlineKeyboardButton
 	if b.miniAppURL != "" {
-		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Открыть приложение").WithWebApp(&telego.WebAppInfo{URL: b.miniAppURL})))
+		rows = append(rows, tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("Открыть приложение").WithWebApp(&telego.WebAppInfo{URL: b.miniAppURL}),
+			tu.InlineKeyboardButton("Бета-тест").WithWebApp(&telego.WebAppInfo{URL: b.betaURL()}),
+		))
 	}
 	if b.networkStatus != nil {
 		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Состояние VPN").WithCallbackData(CallbackNetworkStatus)))
