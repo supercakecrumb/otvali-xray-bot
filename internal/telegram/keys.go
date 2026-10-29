@@ -245,6 +245,7 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 		b.NotifyAdminsOfError(username, chatID, "key_generation", "delivery_failed", "Не удалось отправить ключ пользователю (ключ сгенерирован успешно)")
 		return
 	}
+	b.recordTelegramActivity(update, "key_delivered")
 }
 
 func legacyKeyCaption(serverName, key string) string {

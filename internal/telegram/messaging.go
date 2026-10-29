@@ -99,8 +99,7 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 
 	b.logger.Info("User message received",
 		slog.String("username", username),
-		slog.Int64("user_id", userID),
-		slog.String("message", message.Text))
+		slog.Int64("user_id", userID))
 
 	// Send message to all admins
 	admins, err := b.db.GetAdminUsers()

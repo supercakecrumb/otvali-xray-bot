@@ -59,7 +59,7 @@ func (b *Bot) handleQRSubscription(bot *telego.Bot, update telego.Update) {
 	if !isPrivateActorUpdate(update) || update.Message == nil || update.Message.From.ID <= 0 {
 		return
 	}
-	b.sendSubscriptionQR(bot, update.Message.From.ID)
+	b.sendSubscriptionQR(bot, update.Message.From.ID, update)
 }
 
 func (b *Bot) handleQRKey(bot *telego.Bot, update telego.Update) {
@@ -78,11 +78,11 @@ func (b *Bot) handleQRCallback(bot *telego.Bot, update telego.Update) {
 	case callback.Data == CallbackQRMenu:
 		b.showQRMenu(bot, callback.From.ID)
 	case callback.Data == CallbackQRSubscription:
-		b.sendSubscriptionQR(bot, callback.From.ID)
+		b.sendSubscriptionQR(bot, callback.From.ID, update)
 	case callback.Data == CallbackQRKeys:
 		b.showQRKeys(bot, callback.From.ID)
 	case strings.HasPrefix(callback.Data, CallbackQRManagedPrefix):
-		b.sendManagedQR(bot, callback.From.ID, strings.TrimPrefix(callback.Data, CallbackQRManagedPrefix))
+		b.sendManagedQR(bot, callback.From.ID, strings.TrimPrefix(callback.Data, CallbackQRManagedPrefix), update)
 	case strings.HasPrefix(callback.Data, CallbackQRLegacyPrefix):
 		raw := strings.TrimPrefix(callback.Data, CallbackQRLegacyPrefix)
 		id, err := strconv.ParseInt(raw, 10, 64)
@@ -90,7 +90,7 @@ func (b *Bot) handleQRCallback(bot *telego.Bot, update telego.Update) {
 			b.qrUnavailable(bot, callback.From.ID)
 			return
 		}
-		b.sendLegacyQR(bot, callback.From.ID, id)
+		b.sendLegacyQR(bot, callback.From.ID, id, update)
 	}
 }
 
@@ -161,7 +161,7 @@ func (b *Bot) showQRKeys(bot *telego.Bot, id int64) {
 	b.qrReply(bot, id, text, tu.InlineKeyboard(rows...))
 }
 
-func (b *Bot) sendSubscriptionQR(bot *telego.Bot, id int64) {
+func (b *Bot) sendSubscriptionQR(bot *telego.Bot, id int64, updates ...telego.Update) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	if b.stockholm == nil || !b.stockholm.Eligible(ctx, id) {
@@ -173,10 +173,10 @@ func (b *Bot) sendSubscriptionQR(bot *telego.Bot, id int64) {
 		b.qrAccessError(bot, id, err)
 		return
 	}
-	b.sendQRImage(bot, id, sub.URL, "Подписка Otvali — все маршруты", true)
+	b.sendQRImage(bot, id, sub.URL, "Подписка Otvali — все маршруты", true, updates...)
 }
 
-func (b *Bot) sendManagedQR(bot *telego.Bot, id int64, selected string) {
+func (b *Bot) sendManagedQR(bot *telego.Bot, id int64, selected string, updates ...telego.Update) {
 	if !managedKeyID.MatchString(selected) {
 		b.qrUnavailable(bot, id)
 		return
@@ -195,7 +195,7 @@ func (b *Bot) sendManagedQR(bot *telego.Bot, id int64, selected string) {
 	}
 	for _, key := range keys {
 		if key.ID == selected && validServerKey(key.URL) {
-			b.sendQRImage(bot, id, key.URL, key.Name, false)
+			b.sendQRImage(bot, id, key.URL, key.Name, false, updates...)
 			return
 		}
 	}
@@ -206,7 +206,7 @@ func qrLegacyAllowed(user *database.User, server *database.Server, issuer legacy
 	return user != nil && server != nil && server.ID > 0 && server.InboundID != nil && issuer != nil && !issuer.IsServerDisabled(server.ID) && (!server.IsExclusive || user.ExclusiveAccess || user.IsAdmin)
 }
 
-func (b *Bot) sendLegacyQR(bot *telego.Bot, id, serverID int64) {
+func (b *Bot) sendLegacyQR(bot *telego.Bot, id, serverID int64, updates ...telego.Update) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	store := b.qrRequestStore(ctx)
@@ -229,7 +229,7 @@ func (b *Bot) sendLegacyQR(bot *telego.Bot, id, serverID int64) {
 		b.qrUnavailable(bot, id)
 		return
 	}
-	b.sendQRImage(bot, id, key, server.Country+", "+server.City, false)
+	b.sendQRImage(bot, id, key, server.Country+", "+server.City, false, updates...)
 }
 
 func (b *Bot) qrAccessError(bot *telego.Bot, id int64, err error) {
@@ -259,7 +259,7 @@ type qrPNGFile struct{ *bytes.Reader }
 
 func (qrPNGFile) Name() string { return "otvali-qr.png" }
 
-func (b *Bot) sendQRImage(bot *telego.Bot, id int64, raw, name string, subscription bool) {
+func (b *Bot) sendQRImage(bot *telego.Bot, id int64, raw, name string, subscription bool, updates ...telego.Update) {
 	png, err := qrcode.PNG(raw)
 	if err != nil {
 		b.qrReply(bot, id, "Не удалось создать QR-код: ссылка слишком длинная или недоступна. Скопируйте её через /get_key и добавьте в VPN-приложение.", nil)
@@ -276,5 +276,16 @@ func (b *Bot) sendQRImage(bot *telego.Bot, id int64, raw, name string, subscript
 	if err != nil {
 		b.logger.Warn("Failed to deliver QR image")
 		b.qrReply(bot, id, "Не удалось отправить QR-код. Повторите запрос или скопируйте ссылку через /get_key.", nil)
+		return
+	}
+	if len(updates) == 1 {
+		actor, _, _ := telegramActivity(updates[0])
+		if actor == id {
+			kind := "key_delivered"
+			if subscription {
+				kind = "subscription_delivered"
+			}
+			b.recordTelegramActivity(updates[0], kind)
+		}
 	}
 }

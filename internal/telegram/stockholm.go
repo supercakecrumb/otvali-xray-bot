@@ -67,7 +67,9 @@ func (b *Bot) handleStockholmSubscription(bot *telego.Bot, update telego.Update)
 		text += fmt.Sprintf("\n\nДействует до %s МСК.", subscription.ExpiresAt.In(time.FixedZone("MSK", 3*60*60)).Format("02.01.2006 15:04"))
 	}
 	text += "\n\nУстановка: /help_setup. Ссылку никому не передавайте."
-	b.editStockholmMessage(bot, update, text, subscriptionDeliveryKeyboard())
+	if b.editStockholmMessage(bot, update, text, subscriptionDeliveryKeyboard()) {
+		b.recordTelegramActivity(update, "subscription_delivered")
+	}
 }
 
 func subscriptionDeliveryKeyboard() *telego.InlineKeyboardMarkup {
@@ -95,7 +97,7 @@ func validSubscriptionURL(raw string) bool {
 	return err == nil && len(raw) <= 2048 && u.Scheme == "https" && u.Hostname() != "" && u.User == nil
 }
 
-func (b *Bot) editStockholmMessage(bot *telego.Bot, update telego.Update, text string, keyboard *telego.InlineKeyboardMarkup) {
+func (b *Bot) editStockholmMessage(bot *telego.Bot, update telego.Update, text string, keyboard *telego.InlineKeyboardMarkup) bool {
 	if keyboard == nil {
 		keyboard = tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Получить VPN").WithCallbackData(CallbackGetKey)))
 	}
@@ -103,4 +105,5 @@ func (b *Bot) editStockholmMessage(bot *telego.Bot, update telego.Update, text s
 	if err != nil {
 		b.logger.Warn("Failed to deliver private VPN response")
 	}
+	return err == nil
 }

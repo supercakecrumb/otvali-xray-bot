@@ -26,6 +26,7 @@ type Bot struct {
 	accountStatus     AccountStatusReader
 	qrStore           legacyQRStore
 	qrLegacy          legacyQRIssuer
+	activity          activityRecorder
 	networkStatus     NetworkStatusReader
 	monitorOwnerID    int64
 	monitorOwnerCheck func(context.Context, int64) bool
@@ -62,6 +63,7 @@ func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x
 	}
 	if db != nil {
 		b.qrStore = db
+		b.activity = db
 	}
 	if serverHandler != nil {
 		b.qrLegacy = serverHandler
@@ -109,6 +111,7 @@ func (b *Bot) Start() {
 		b.privateChatMiddleware(),
 		b.userUsernameMiddleware(),
 		b.userDatabaseMiddleware(),
+		b.activityMiddleware(),
 	)
 
 	b.registerCommands()
