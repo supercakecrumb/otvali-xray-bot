@@ -72,3 +72,14 @@ func ValidateInitData(raw, botToken string, now time.Time) (int64, error) {
 	}
 	return user.ID, nil
 }
+
+// Each accepted token belongs to a bot serving the same account store. The
+// verified Telegram user ID stays the account identity across those bots.
+func validateInitDataWithTokens(raw string, botTokens []string, now time.Time) (int64, error) {
+	for _, token := range botTokens {
+		if id, err := ValidateInitData(raw, token, now); err == nil {
+			return id, nil
+		}
+	}
+	return 0, ErrUnauthorized
+}

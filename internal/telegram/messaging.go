@@ -1,16 +1,69 @@
 package telegram
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
 	tu "github.com/mymmrac/telego/telegoutil"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 )
+
+type messageStore interface {
+	GetUserByTelegramID(int64) (*database.User, error)
+	GetAdminUsers() ([]database.User, error)
+	IsUserAdmin(int64) (bool, error)
+	AddUserMessage(*database.UserMessage) error
+	AddUserMessageForward(*database.UserMessageForward) error
+	GetUserMessageByAdminForward(int64, int64, int) (*database.UserMessage, error)
+	GetLegacyUserMessageByAdminReply(int, int64) (*database.UserMessage, error)
+}
+
+func (b *Bot) messageStore() messageStore {
+	if b.messages != nil {
+		return b.messages
+	}
+	return b.db
+}
+
+// A legacy row has no admin chat ID. The old bot's canonical forward header is
+// additional evidence of its recipient; a bare coinciding message ID is unsafe.
+func (b *Bot) legacyReplyRecipient(message *telego.Message) int64 {
+	if !b.legacyMessageFallback || b.ID() <= 0 || b.ID() != b.primaryBotID || message == nil || message.ReplyToMessage == nil {
+		return 0
+	}
+	replied := message.ReplyToMessage
+	if replied.From == nil || !replied.From.IsBot || replied.From.ID != b.primaryBotID || replied.Chat.ID != message.Chat.ID || replied.Chat.Type != "private" {
+		return 0
+	}
+	lines := strings.SplitN(replied.Text, "\n", 8)
+	if len(lines) != 8 || lines[0] != "💬 Сообщение от пользователя" || lines[1] != "" ||
+		!strings.HasPrefix(lines[2], "👤 От: ") || !strings.HasPrefix(lines[3], "🆔 ID: ") ||
+		!strings.HasPrefix(lines[4], "🕐 Время: ") || lines[5] != "" || lines[6] != "📨 Сообщение:" {
+		return 0
+	}
+	encoded := strings.TrimPrefix(lines[3], "🆔 ID: ")
+	id, err := strconv.ParseInt(encoded, 10, 64)
+	if err != nil || id <= 0 || strconv.FormatInt(id, 10) != encoded {
+		return 0
+	}
+	// Names are user-controlled and may contain newlines. The actual recipient
+	// was formatted as code; an apparent ID injected into a name is plain text.
+	prefix := strings.Join(lines[:3], "\n") + "\n🆔 ID: "
+	offset := len(utf16.Encode([]rune(prefix)))
+	for _, entity := range replied.Entities {
+		if entity.Type == "code" && entity.Offset == offset && entity.Length == len(encoded) {
+			return id
+		}
+	}
+	return 0
+}
 
 // registerMessagingHandlers registers handlers for bidirectional messaging
 func (b *Bot) registerMessagingHandlers() {
@@ -32,7 +85,7 @@ func (b *Bot) registerMessagingHandlers() {
 
 // handleUserMessage forwards user messages to admins
 func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
-	if update.Message == nil {
+	if update.Message == nil || !isPrivateActorUpdate(update) || b.ID() <= 0 {
 		return
 	}
 
@@ -41,7 +94,8 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 	username := message.From.Username
 
 	// Check if user exists in database
-	user, err := b.db.GetUserByTelegramID(userID)
+	store := b.messageStore()
+	user, err := store.GetUserByTelegramID(userID)
 	if err != nil {
 		b.logger.Warn("User not found in database, ignoring message",
 			slog.Int64("user_id", userID),
@@ -56,18 +110,19 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 
 	// Save user message to database
 	userMsg := &database.UserMessage{
-		UserID:        userID,
-		Username:      username,
-		MessageText:   message.Text,
-		IsAdminReply:  false,
-		TelegramMsgID: message.MessageID,
-		CreatedAt:     time.Now(),
+		BotID:          b.ID(),
+		TelegramChatID: message.Chat.ID,
+		UserID:         userID,
+		Username:       username,
+		MessageText:    message.Text,
+		IsAdminReply:   false,
+		TelegramMsgID:  message.MessageID,
+		CreatedAt:      time.Now(),
 	}
 
-	if err := b.db.AddUserMessage(userMsg); err != nil {
-		b.logger.Error("Failed to save user message",
-			slog.String("error", err.Error()),
-			slog.String("username", username))
+	if err := store.AddUserMessage(userMsg); err != nil {
+		b.logger.Error("Failed to save user message")
+		return
 	}
 
 	// Format message for admins
@@ -86,7 +141,9 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 	safeMessageText := escapeMarkdown(message.Text)
 
 	forwardMessage := fmt.Sprintf(
-		"💬 *Сообщение от пользователя*\n\n"+
+		// Keep this heading distinct from legacy copies: if saving a new
+		// forward reference fails, it must never use the historical fallback.
+		"💬 *Сообщение пользователя*\n\n"+
 			"👤 От: %s\n"+
 			"🆔 ID: `%d`\n"+
 			"🕐 Время: %s\n\n"+
@@ -102,9 +159,9 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 		slog.Int64("user_id", userID))
 
 	// Send message to all admins
-	admins, err := b.db.GetAdminUsers()
+	admins, err := store.GetAdminUsers()
 	if err != nil {
-		b.logger.Error("Failed to fetch admin users", slog.String("error", err.Error()))
+		b.logger.Error("Failed to fetch admin users")
 		return
 	}
 
@@ -118,20 +175,14 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 			forwardMessage,
 		).WithParseMode(telego.ModeMarkdown)
 
-		sentMsg, err := bot.SendMessage(msg)
+		sentMsg, err := b.notificationSender().SendMessage(msg)
 		if err != nil {
 			b.logger.Error("Failed to forward message to admin",
-				slog.String("admin", admin.Username),
-				slog.String("error", err.Error()))
+				slog.String("admin", admin.Username))
 		} else {
-			// Update the database with admin chat message ID for the first admin
-			if userMsg.AdminChatMsgID == nil {
-				adminMsgID := sentMsg.MessageID
-				userMsg.AdminChatMsgID = &adminMsgID
-				if err := b.db.Conn.Save(userMsg).Error; err != nil {
-					b.logger.Error("Failed to update message with admin chat ID",
-						slog.String("error", err.Error()))
-				}
+			forward := &database.UserMessageForward{BotID: b.primaryBotID, AdminChatID: *admin.TelegramID, TelegramMsgID: sentMsg.MessageID, UserMessageID: userMsg.ID}
+			if err := store.AddUserMessageForward(forward); err != nil {
+				b.logger.Error("Failed to save admin message reference")
 			}
 		}
 	}
@@ -139,7 +190,7 @@ func (b *Bot) handleUserMessage(bot *telego.Bot, update telego.Update) {
 
 // handleAdminReply handles admin replies to user messages
 func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
-	if update.Message == nil || update.Message.ReplyToMessage == nil {
+	if update.Message == nil || update.Message.ReplyToMessage == nil || !isPrivateActorUpdate(update) || b.ID() <= 0 {
 		return
 	}
 
@@ -149,7 +200,8 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 	adminUsername := message.From.Username
 
 	// Check if sender is admin
-	isAdmin, err := b.db.IsUserAdmin(adminID)
+	store := b.messageStore()
+	isAdmin, err := store.IsUserAdmin(adminID)
 	if err != nil || !isAdmin {
 		// Not an admin, ignore
 		return
@@ -157,11 +209,15 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 
 	// Get the original message from database using the replied-to message ID
 	repliedMsgID := update.Message.ReplyToMessage.MessageID
-	originalMsg, err := b.db.GetUserMessageByAdminChatMsgID(repliedMsgID)
+	originalMsg, err := store.GetUserMessageByAdminForward(b.ID(), chatID, repliedMsgID)
+	if errors.Is(err, database.ErrUserNotFound) {
+		if recipient := b.legacyReplyRecipient(message); recipient > 0 {
+			originalMsg, err = store.GetLegacyUserMessageByAdminReply(repliedMsgID, recipient)
+		}
+	}
 	if err != nil {
 		b.logger.Warn("Could not find original user message",
-			slog.Int("replied_msg_id", repliedMsgID),
-			slog.String("error", err.Error()))
+			slog.Int("replied_msg_id", repliedMsgID))
 
 		// Send error to admin
 		errorMsg := tu.Message(
@@ -171,22 +227,31 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 		_, _ = bot.SendMessage(errorMsg)
 		return
 	}
+	originBot := b.senderForBotID(originalMsg.BotID)
+	if originBot == nil {
+		b.logger.Warn("Original message bot is unavailable")
+		_, _ = bot.SendMessage(tu.Message(tu.ID(chatID), "⚠️ Бот, через который пришло сообщение, сейчас недоступен. Ответ не отправлен."))
+		return
+	}
 
 	// Save admin reply to database
 	adminReply := &database.UserMessage{
-		UserID:        originalMsg.UserID,
-		Username:      originalMsg.Username,
-		AdminID:       &adminID,
-		MessageText:   message.Text,
-		IsAdminReply:  true,
-		ReplyToID:     &originalMsg.ID,
-		TelegramMsgID: message.MessageID,
-		CreatedAt:     time.Now(),
+		BotID:          b.ID(),
+		TelegramChatID: chatID,
+		UserID:         originalMsg.UserID,
+		Username:       originalMsg.Username,
+		AdminID:        &adminID,
+		MessageText:    message.Text,
+		IsAdminReply:   true,
+		ReplyToID:      &originalMsg.ID,
+		TelegramMsgID:  message.MessageID,
+		CreatedAt:      time.Now(),
 	}
 
-	if err := b.db.AddUserMessage(adminReply); err != nil {
-		b.logger.Error("Failed to save admin reply",
-			slog.String("error", err.Error()))
+	if err := store.AddUserMessage(adminReply); err != nil {
+		b.logger.Error("Failed to save admin reply")
+		_, _ = bot.SendMessage(tu.Message(tu.ID(chatID), "⚠️ Не удалось сохранить ответ. Попробуйте ещё раз."))
+		return
 	}
 
 	// Format reply message for user
@@ -207,18 +272,16 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 		userMsg = userMsg.WithReplyParameters(replyParams)
 	}
 
-	_, err = bot.SendMessage(userMsg)
+	_, err = originBot.SendMessage(userMsg)
 	if err != nil {
 		b.logger.Error("Failed to send reply to user",
 			slog.Int64("user_id", originalMsg.UserID),
-			slog.String("username", originalMsg.Username),
-			slog.String("error", err.Error()))
+			slog.String("username", originalMsg.Username))
 
 		// Notify admin about failure
 		errorMsg := tu.Message(
 			tu.ID(chatID),
-			fmt.Sprintf("❌ Не удалось отправить ответ пользователю @%s. Ошибка: %s",
-				originalMsg.Username, err.Error()),
+			fmt.Sprintf("❌ Не удалось отправить ответ пользователю @%s. Попробуйте ещё раз.", originalMsg.Username),
 		)
 		_, _ = bot.SendMessage(errorMsg)
 		return
@@ -231,8 +294,7 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 	)
 	_, err = bot.SendMessage(confirmMsg)
 	if err != nil {
-		b.logger.Error("Failed to send confirmation to admin",
-			slog.String("error", err.Error()))
+		b.logger.Error("Failed to send confirmation to admin")
 	}
 
 	b.logger.Info("Admin reply sent",
@@ -255,7 +317,7 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 		timestamp,
 	)
 
-	admins, err := b.db.GetAdminUsers()
+	admins, err := store.GetAdminUsers()
 	if err == nil {
 		for _, admin := range admins {
 			if admin.TelegramID == nil {
@@ -272,11 +334,10 @@ func (b *Bot) handleAdminReply(bot *telego.Bot, update telego.Update) {
 				notificationMsg,
 			).WithParseMode(telego.ModeMarkdown)
 
-			_, err := bot.SendMessage(notifMsg)
+			_, err := b.notificationSender().SendMessage(notifMsg)
 			if err != nil {
 				b.logger.Error("Failed to notify other admin",
-					slog.String("admin", admin.Username),
-					slog.String("error", err.Error()))
+					slog.String("admin", admin.Username))
 			}
 		}
 	}

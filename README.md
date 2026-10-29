@@ -217,11 +217,46 @@ When a credential is too long for QR, users can still copy the original link.
 
 ## Optional Telegram Mini App API
 
+### Additional Telegram bot
+
+Keep `TELEGRAM_TOKEN` as the existing bot and set optional
+`TELEGRAM_ADDITIONAL_TOKENS` to the new bot token in private deployment
+configuration. Multiple additional tokens may be comma-separated (eight bots
+maximum). Duplicate numeric bot identities are rejected, including different
+tokens for the same bot. One runtime starts one long-polling worker per bot;
+do not add replicas or a second process that polls any of those identities.
+
+All bots share the existing database, VPN services, HTTP listener and one monitor
+loop. Existing users open the new bot and press Start; their numeric Telegram ID
+selects the same account, permissions and VPN credentials. Do not copy users or
+reissue credentials for the migration. Unbound users still require invitation.
+The legacy bot remains active and sends monitor and administrator notifications.
+User messages forwarded to administrators retain their origin bot so replies
+return to the correct chat. Each bot accepts `/start beta` as well as `/beta`;
+`https://t.me/<bot_username>?start=beta` opens the beta entry button.
+
+The shared Mini App API accepts signed launch data from every configured bot,
+with the same account checks and request quotas. Configure the new bot's Mini App
+launch URL to the existing approved `VPN_HELP_URL`; the origin allowlist remains
+unchanged. Removing an additional token disables its poller and Mini App signing
+key on restart while preserving all accounts, messages and VPN credentials.
+
+The heartbeat and `/health` require PostgreSQL and a successful long-poll response
+within 90 seconds from every configured bot. Transient polling errors retry;
+rate-limit responses honor Telegram's retry delay. A permanent 401/409 error or
+90 seconds without successful polling stops the runtime so the supervisor can
+restart the entire group. An explicit 429 cooldown postpones that deadline until
+90 seconds after the allowed retry; it never substitutes for the first successful
+poll. Requests have a 15-second timeout. The log emits
+`Telegram polling active` with each numeric
+`bot_id` after its first successful poll, never its token. Verify both identities
+separately after rollout; these checks do not prove a user received a reply.
+
 `MINIAPP_ENABLED=false` leaves the HTTP listener closed. Enable only behind the
 approved HTTPS reverse proxy, using private container `MINIAPP_PORT=8080` and
 exact `MINIAPP_ALLOWED_ORIGINS` from `.env.example`. Do not publish a Docker host
-port. `GET /health` checks PostgreSQL without depending on Remnawave; the bot's
-existing silent heartbeat health check remains unchanged.
+port. `GET /health` checks PostgreSQL and every Telegram poller without depending
+on Remnawave; the silent heartbeat uses the same runtime checks.
 
 The frontend sends `Authorization: tma <Telegram.WebApp.initData>` and
 `Content-Type: application/json` on every private POST. The backend verifies

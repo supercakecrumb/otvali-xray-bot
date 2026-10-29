@@ -30,7 +30,7 @@ func NewDB(connectionString string, logger *slog.Logger) (*DB, error) {
 		logger.Error("Failed to migrate database schema", slog.String("error", err.Error()))
 		return nil, err
 	}
-	if err := db.AutoMigrate(&UserMessage{}); err != nil {
+	if err := db.AutoMigrate(&UserMessage{}, &UserMessageForward{}); err != nil {
 		logger.Error("Failed to migrate database schema", slog.String("error", err.Error()))
 		return nil, err
 	}

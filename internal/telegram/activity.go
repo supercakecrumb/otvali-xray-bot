@@ -16,8 +16,8 @@ type activityRecorder interface {
 	RecordActivity(context.Context, int64, string, string, string, time.Time) error
 }
 
-func telegramActivity(update telego.Update) (actor int64, kind, digest string) {
-	if update.UpdateID <= 0 || !isPrivateActorUpdate(update) {
+func telegramActivity(update telego.Update, botID int64) (actor int64, kind, digest string) {
+	if botID <= 0 || update.UpdateID <= 0 || !isPrivateActorUpdate(update) {
 		return
 	}
 	if update.Message != nil {
@@ -38,14 +38,22 @@ func telegramActivity(update telego.Update) (actor int64, kind, digest string) {
 	if actor <= 0 {
 		return 0, "", ""
 	}
-	sum := sha256.Sum256([]byte("telegram:" + strconv.Itoa(update.UpdateID)))
+	// Telegram update IDs are unique only within one bot's update stream.
+	sum := sha256.Sum256([]byte("telegram:" + strconv.FormatInt(botID, 10) + ":" + strconv.Itoa(update.UpdateID)))
 	return actor, kind, hex.EncodeToString(sum[:])
 }
 
 func (b *Bot) recordTelegramActivity(update telego.Update, override string) {
-	actor, kind, eventID := telegramActivity(update)
+	actor, kind, eventID := telegramActivity(update, b.ID())
 	if actor <= 0 || b.activity == nil {
 		return
+	}
+	if b.ID() == b.legacyActivityBotID {
+		// The first deployment persisted these unscoped digests. Their immutable
+		// owner keeps that namespace; all other bots use their numeric bot ID.
+		// This preserves replay deduplication without rewriting historical rows.
+		sum := sha256.Sum256([]byte("telegram:" + strconv.Itoa(update.UpdateID)))
+		eventID = hex.EncodeToString(sum[:])
 	}
 	if override != "" {
 		kind = override

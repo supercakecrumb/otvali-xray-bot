@@ -53,6 +53,12 @@ func TestActivityPostgresDedupAndPreservation(t *testing.T) {
 	db := &DB{Conn: conn}
 	ctx := context.Background()
 	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	// Seed the pre-dual-bot metadata schema to prove the nullable owner column
+	// is additive and does not reset the historical collection start.
+	if conn.Exec("CREATE TABLE activity_collections (id bigint PRIMARY KEY, started_at timestamptz NOT NULL)").Error != nil ||
+		conn.Exec("INSERT INTO activity_collections (id, started_at) VALUES (1, ?)", now).Error != nil {
+		t.Fatal("legacy collection fixture failed")
+	}
 	if db.InitActivity(ctx, now) != nil || db.InitActivity(ctx, now.Add(time.Hour)) != nil {
 		t.Fatal("additive activity initialization failed")
 	}
@@ -62,6 +68,34 @@ func TestActivityPostgresDedupAndPreservation(t *testing.T) {
 	}
 	event := strings.Repeat("a", 64)
 	var wg sync.WaitGroup
+	owners := make(chan int64, 16)
+	for i := 0; i < cap(owners); i++ {
+		wg.Add(1)
+		go func(proposed int64) {
+			defer wg.Done()
+			owner, err := db.BindLegacyTelegramActivityBot(ctx, proposed)
+			if err != nil {
+				owners <- 0
+				return
+			}
+			owners <- owner
+		}(int64(100 + i%2))
+	}
+	wg.Wait()
+	close(owners)
+	var owner int64
+	for observed := range owners {
+		if observed <= 0 || (owner != 0 && observed != owner) {
+			t.Fatal("concurrent startup reassigned the legacy Telegram namespace")
+		}
+		owner = observed
+	}
+	if rebound, err := db.BindLegacyTelegramActivityBot(ctx, 999); err != nil || rebound != owner {
+		t.Fatal("changing primary reassigned historical activity")
+	}
+	if conn.First(&collection, 1).Error != nil || !collection.StartedAt.Equal(now) {
+		t.Fatal("binding namespace changed collection timestamp")
+	}
 	errs := make(chan error, 16)
 	for i := 0; i < 16; i++ {
 		wg.Add(1)

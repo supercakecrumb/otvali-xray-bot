@@ -26,8 +26,29 @@ type ActivityEvent struct {
 // The first deployment timestamp is retained across restarts. Historical
 // unobserved actions must not be reported as zero or reconstructed from keys.
 type ActivityCollection struct {
-	ID        int       `gorm:"primaryKey;autoIncrement:false"`
-	StartedAt time.Time `gorm:"not null"`
+	ID                  int       `gorm:"primaryKey;autoIncrement:false"`
+	StartedAt           time.Time `gorm:"not null"`
+	LegacyTelegramBotID *int64    // Immutable owner of pre-migration Telegram event digests.
+}
+
+// BindLegacyTelegramActivityBot assigns the pre-migration digest namespace only
+// once. Changing notification primary or rotating a token must not reassign it.
+// Existing events and the original collection timestamp are never rewritten.
+func (db *DB) BindLegacyTelegramActivityBot(ctx context.Context, proposedID int64) (int64, error) {
+	if db == nil || db.Conn == nil || proposedID <= 0 {
+		return 0, ErrActivityUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	tx := db.Conn.Session(&gorm.Session{Logger: logger.Discard}).WithContext(ctx)
+	if err := tx.Model(&ActivityCollection{}).Where("id = 1 AND legacy_telegram_bot_id IS NULL").Update("legacy_telegram_bot_id", proposedID).Error; err != nil {
+		return 0, ErrActivityUnavailable
+	}
+	var collection ActivityCollection
+	if err := tx.First(&collection, 1).Error; err != nil || collection.LegacyTelegramBotID == nil || *collection.LegacyTelegramBotID <= 0 {
+		return 0, ErrActivityUnavailable
+	}
+	return *collection.LegacyTelegramBotID, nil
 }
 
 var ErrActivityUnavailable = errors.New("activity unavailable")

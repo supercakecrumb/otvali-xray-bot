@@ -118,17 +118,33 @@ func run() int {
 		}
 		botOptions = append(botOptions, telegram.WithNetworkStatus(monitor, cfg.VPNMonitor.AlertChatID))
 	}
-	bot, err := telegram.NewBot(cfg.TelegramToken, log, db, serverHandler, botOptions...)
+	var bots []*telegram.Bot
+	var pollers []pollingBot
+	for _, token := range cfg.TelegramTokens() {
+		bot, err := telegram.NewBot(token, log, db, serverHandler, botOptions...)
+		if err != nil {
+			log.Error("Failed to initialize Telegram bot")
+			return 1
+		}
+		bots = append(bots, bot)
+		pollers = append(pollers, bot)
+	}
+	bot := bots[0]
+	legacyActivityBotID, err := db.BindLegacyTelegramActivityBot(ctx, bot.ID())
 	if err != nil {
-		log.Error("Failed to initialize bot", slog.String("error", err.Error()))
+		log.Error("Failed to bind legacy Telegram activity identity")
 		return 1
 	}
-	defer bot.Stop()
+	for _, peer := range bots {
+		peer.ConfigurePeers(bot, bots)
+		peer.SetLegacyActivityBotID(legacyActivityBotID)
+	}
+	runtimeStatus := botRuntimeHealth{database: pool, bots: pollers}
 
 	var apiServer *http.Server
 	var apiErrors <-chan error
 	if cfg.MiniApp.Enabled {
-		handler, err := miniapp.NewHandler(cfg.MiniApp, cfg.TelegramToken, accountService, pool)
+		handler, err := miniapp.NewHandler(cfg.MiniApp, cfg.TelegramToken, accountService, runtimeStatus, cfg.TelegramAdditionalTokens...)
 		if err != nil {
 			log.Error("Invalid Mini App configuration")
 			return 1
@@ -162,7 +178,7 @@ func run() int {
 	healthDone := make(chan struct{})
 	go func() {
 		defer close(healthDone)
-		runtimehealth.Monitor(ctx, pool, runtimehealth.Path, log)
+		runtimehealth.Monitor(ctx, runtimeStatus, runtimehealth.Path, log)
 	}()
 	monitorDone := make(chan struct{})
 	if monitor != nil {
@@ -172,15 +188,12 @@ func run() int {
 		close(monitorDone)
 	}
 
-	// Start the bot in a separate goroutine
-	botDone := make(chan struct{})
-	go func() {
-		defer close(botDone)
-		log.Info("Bot is starting...")
-		bot.Start()
-	}()
+	// One poller per bot identity shares the same database, issuers and listener.
+	botDone := startBotPollers(ctx, pollers)
+	log.Info("Telegram pollers started", "bot_count", len(pollers))
 
 	exitCode := 0
+	stoppedBots := 0
 	select {
 	case <-ctx.Done():
 	case <-apiErrors:
@@ -188,13 +201,15 @@ func run() int {
 			log.Error("Mini App API stopped unexpectedly")
 			exitCode = 1
 		}
-	case <-botDone:
+	case botID := <-botDone:
+		stoppedBots++
 		if ctx.Err() == nil {
-			log.Error("Bot stopped unexpectedly")
+			log.Error("Bot stopped unexpectedly", "bot_id", botID)
 			exitCode = 1
 		}
 	}
 	stop()
+	stopBotPollers(pollers, botDone, stoppedBots)
 	if apiServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if apiServer.Shutdown(shutdownCtx) != nil {

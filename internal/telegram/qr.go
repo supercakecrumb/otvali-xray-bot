@@ -279,7 +279,7 @@ func (b *Bot) sendQRImage(bot *telego.Bot, id int64, raw, name string, subscript
 		return
 	}
 	if len(updates) == 1 {
-		actor, _, _ := telegramActivity(updates[0])
+		actor, _, _ := telegramActivity(updates[0], b.ID())
 		if actor == id {
 			kind := "key_delivered"
 			if subscription {

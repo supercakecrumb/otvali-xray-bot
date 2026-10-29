@@ -69,7 +69,7 @@ func stockholmTestBot(t *testing.T, issuer StockholmIssuer) (*Bot, *stockholmTel
 		t.Fatal(err)
 	}
 	// Nil legacy handler/database make any accidental FI access or admin notification fail.
-	b := &Bot{bot: api, logger: logger}
+	b := &Bot{bot: api, botID: 123456789, primaryBotID: 123456789, logger: logger}
 	WithStockholm(issuer)(b)
 	return b, caller, logs
 }

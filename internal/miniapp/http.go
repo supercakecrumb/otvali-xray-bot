@@ -57,7 +57,7 @@ type bucket struct {
 	count int
 }
 type handler struct {
-	token    string
+	tokens   []string
 	origins  map[string]bool
 	backend  Backend
 	health   Pinger
@@ -68,11 +68,22 @@ type handler struct {
 	inFlight chan struct{}
 }
 
-func NewHandler(c Config, token string, backend Backend, health Pinger) (http.Handler, error) {
+func NewHandler(c Config, token string, backend Backend, health Pinger, additionalTokens ...string) (http.Handler, error) {
 	if !c.Enabled || token == "" || backend == nil || len(c.AllowedOrigins) == 0 {
 		return nil, errors.New("invalid Mini App configuration")
 	}
-	h := &handler{token: token, backend: backend, health: health, now: time.Now, origins: map[string]bool{}, users: map[int64]bucket{}, inFlight: make(chan struct{}, 8)}
+	tokens := []string{token}
+	seen := map[string]bool{token: true}
+	for _, additional := range additionalTokens {
+		if strings.TrimSpace(additional) == "" {
+			return nil, errors.New("invalid Mini App configuration")
+		}
+		if !seen[additional] {
+			tokens = append(tokens, additional)
+			seen[additional] = true
+		}
+	}
+	h := &handler{tokens: tokens, backend: backend, health: health, now: time.Now, origins: map[string]bool{}, users: map[int64]bucket{}, inFlight: make(chan struct{}, 8)}
 	for _, origin := range c.AllowedOrigins {
 		h.origins[origin] = true
 	}
@@ -152,7 +163,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "unauthorized")
 		return
 	}
-	actorID, err := ValidateInitData(strings.TrimPrefix(authorization[0], "tma "), h.token, h.now())
+	actorID, err := validateInitDataWithTokens(strings.TrimPrefix(authorization[0], "tma "), h.tokens, h.now())
 	if err != nil {
 		writeError(w, 401, "unauthorized")
 		return

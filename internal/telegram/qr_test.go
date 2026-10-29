@@ -84,7 +84,7 @@ func qrTestBot(t *testing.T, issuer StockholmIssuer) (*Bot, *qrTelegramCaller, *
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Bot{bot: api, logger: logger, stockholm: issuer}, caller, logs
+	return &Bot{bot: api, botID: 123456789, primaryBotID: 123456789, logger: logger, stockholm: issuer}, caller, logs
 }
 
 func qrCommand(text string) telego.Update {

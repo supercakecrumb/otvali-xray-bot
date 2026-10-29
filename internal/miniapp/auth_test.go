@@ -13,10 +13,14 @@ import (
 )
 
 const testToken = "123456:synthetic-token"
+const secondTestToken = "654321:second-synthetic-token"
 
 var testNow = time.Date(2026, 10, 19, 15, 0, 0, 0, time.UTC)
 
 func sign(values url.Values) string {
+	return signWithToken(values, testToken)
+}
+func signWithToken(values url.Values, token string) string {
 	fields := []string{}
 	for key := range values {
 		if key != "hash" {
@@ -25,14 +29,17 @@ func sign(values url.Values) string {
 	}
 	sort.Strings(fields)
 	secret := hmac.New(sha256.New, []byte("WebAppData"))
-	secret.Write([]byte(testToken))
+	secret.Write([]byte(token))
 	mac := hmac.New(sha256.New, secret.Sum(nil))
 	mac.Write([]byte(strings.Join(fields, "\n")))
 	values.Set("hash", hex.EncodeToString(mac.Sum(nil)))
 	return values.Encode()
 }
 func initData(id int64) string {
-	return sign(url.Values{"auth_date": {strconv.FormatInt(testNow.Unix(), 10)}, "user": {"{\"id\":" + strconv.FormatInt(id, 10) + ",\"username\":\"untrusted_mutable_name\"}"}, "signature": {"modern-signed-field"}})
+	return initDataWithToken(id, testToken)
+}
+func initDataWithToken(id int64, token string) string {
+	return signWithToken(url.Values{"auth_date": {strconv.FormatInt(testNow.Unix(), 10)}, "user": {"{\"id\":" + strconv.FormatInt(id, 10) + ",\"username\":\"untrusted_mutable_name\"}"}, "signature": {"modern-signed-field"}}, token)
 }
 func TestInitDataValidatesNumericIDAndModernSignature(t *testing.T) {
 	const id = int64(4294967338)
@@ -102,5 +109,53 @@ func TestInitDataOneHourBoundary(t *testing.T) {
 	}
 	if _, err := ValidateInitData(initData(42), "wrong-token", testNow); err == nil {
 		t.Fatal("another bot token must fail")
+	}
+}
+
+func TestInitDataConfiguredBotsKeepTheSameNumericIdentity(t *testing.T) {
+	const id = int64(4294967338)
+	tokens := []string{testToken, secondTestToken}
+	for _, token := range tokens {
+		if got, err := validateInitDataWithTokens(initDataWithToken(id, token), tokens, testNow); err != nil || got != id {
+			t.Fatal("either configured bot must authenticate the same numeric identity")
+		}
+	}
+	for _, tokens := range [][]string{nil, {testToken}, {""}} {
+		if _, err := validateInitDataWithTokens(initDataWithToken(id, secondTestToken), tokens, testNow); err != ErrUnauthorized {
+			t.Fatal("unconfigured bot must not authenticate")
+		}
+	}
+}
+
+func TestInitDataAdditionalBotPreservesStrictValidation(t *testing.T) {
+	for _, name := range []string{"unknown_token", "tampered_user", "tampered_signature", "expired", "future", "duplicate_user", "duplicate_hash"} {
+		t.Run(name, func(t *testing.T) {
+			values, _ := url.ParseQuery(initDataWithToken(42, secondTestToken))
+			raw := ""
+			switch name {
+			case "unknown_token":
+				raw = signWithToken(values, "999999:unknown-synthetic-token")
+			case "tampered_user":
+				values.Set("user", `{"id":99}`)
+			case "tampered_signature":
+				values.Set("signature", "tampered")
+			case "expired":
+				values.Set("auth_date", strconv.FormatInt(testNow.Add(-maxInitDataAge-time.Second).Unix(), 10))
+				raw = signWithToken(values, secondTestToken)
+			case "future":
+				values.Set("auth_date", strconv.FormatInt(testNow.Add(31*time.Second).Unix(), 10))
+				raw = signWithToken(values, secondTestToken)
+			case "duplicate_user":
+				values.Add("user", `{"id":99}`)
+			case "duplicate_hash":
+				values.Add("hash", values.Get("hash"))
+			}
+			if raw == "" {
+				raw = values.Encode()
+			}
+			if _, err := validateInitDataWithTokens(raw, []string{testToken, secondTestToken}, testNow); err != ErrUnauthorized {
+				t.Fatal("multi-bot validation must reject invalid launch data")
+			}
+		})
 	}
 }

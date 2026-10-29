@@ -6,6 +6,10 @@ initData authentication, exact Origin allowlist, private no-store responses,
 request quotas and bounded concurrency. Every action rechecks the current
 numeric Telegram binding; administrator actions also check the stored role.
 
+The private-chat commands `/beta` and `/start beta` open the beta entry. A link
+`https://t.me/<bot_username>?start=beta` works with either configured bot. Both
+launch signatures resolve the same existing account and feedback history.
+
 There is no unauthenticated form, third-party form provider, screenshot upload,
 IP lookup, exact-location collection or automatic tester invitation. Do not
 paste credentials or raw logs. Cities/providers may be entered as «Не знаю».

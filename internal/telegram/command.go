@@ -51,6 +51,10 @@ func (b *Bot) handleStart(bot *telego.Bot, update telego.Update) {
 	// Notify admins about command usage
 	b.NotifyAdminsOfCommand(username, chatID, "/start", "")
 
+	if args := strings.Fields(update.Message.Text); len(args) == 2 && args[1] == "beta" {
+		b.handleBeta(bot, update)
+		return
+	}
 	b.handleHelp(bot, update)
 }
 

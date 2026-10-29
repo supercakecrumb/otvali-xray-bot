@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -15,23 +19,39 @@ import (
 )
 
 type Bot struct {
-	bot               *telego.Bot
-	logger            *slog.Logger
-	db                *database.DB
-	bh                *th.BotHandler
-	sh                *x3ui.ServerHandler
-	stockholm         StockholmIssuer
-	vpnHelpURL        string
-	miniAppURL        string
-	accountStatus     AccountStatusReader
-	qrStore           legacyQRStore
-	qrLegacy          legacyQRIssuer
-	activity          activityRecorder
-	networkStatus     NetworkStatusReader
-	monitorOwnerID    int64
-	monitorOwnerCheck func(context.Context, int64) bool
-	monitorAdminCheck func(context.Context, int64) bool
-	monitorBot        *telego.Bot
+	bot                   *telego.Bot
+	botID                 int64
+	legacyActivityBotID   int64
+	pollingLastOK         atomic.Int64
+	pollingStartedAt      atomic.Int64
+	pollingFailures       atomic.Int64
+	pollingRetryUntil     atomic.Int64
+	pollingFailed         atomic.Bool
+	primaryBotID          int64
+	legacyMessageFallback bool
+	notificationBot       *telego.Bot
+	peerBots              map[int64]*telego.Bot
+	lifecycleMu           sync.Mutex
+	cancel                context.CancelFunc
+	started               bool
+	stopRequested         bool
+	logger                *slog.Logger
+	db                    *database.DB
+	bh                    *th.BotHandler
+	sh                    *x3ui.ServerHandler
+	stockholm             StockholmIssuer
+	vpnHelpURL            string
+	miniAppURL            string
+	accountStatus         AccountStatusReader
+	qrStore               legacyQRStore
+	qrLegacy              legacyQRIssuer
+	activity              activityRecorder
+	messages              messageStore
+	networkStatus         NetworkStatusReader
+	monitorOwnerID        int64
+	monitorOwnerCheck     func(context.Context, int64) bool
+	monitorAdminCheck     func(context.Context, int64) bool
+	monitorBot            *telego.Bot
 }
 
 type Option func(*Bot)
@@ -50,16 +70,23 @@ func WithStockholm(issuer StockholmIssuer) Option {
 }
 
 func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x3ui.ServerHandler, options ...Option) (*Bot, error) {
-	bot, err := telego.NewBot(token, telego.WithLogger(telegramAPILogger{logger: logger}))
+	bot, err := telego.NewBot(token, telego.WithLogger(telegramAPILogger{logger: logger}), telego.WithHTTPClient(&http.Client{Timeout: 15 * time.Second}))
 	if err != nil {
 		return nil, err
 	}
+	botID, err := strconv.ParseInt(strings.SplitN(token, ":", 2)[0], 10, 64)
+	if err != nil || botID <= 0 {
+		return nil, fmt.Errorf("invalid Telegram bot identity")
+	}
 
 	b := &Bot{
-		bot:    bot,
-		logger: logger,
-		db:     db,
-		sh:     serverHandler,
+		bot:                   bot,
+		botID:                 botID,
+		primaryBotID:          botID,
+		legacyMessageFallback: true,
+		logger:                logger,
+		db:                    db,
+		sh:                    serverHandler,
 	}
 	if db != nil {
 		b.qrStore = db
@@ -82,28 +109,86 @@ func NewBot(token string, logger *slog.Logger, db *database.DB, serverHandler *x
 	return b, nil
 }
 
-func (b *Bot) Start() {
-	b.logger.Info("Starting bot...")
+// ID is the public numeric bot identity; it does not expose its credential and
+// remains stable when a token is rotated.
+func (b *Bot) ID() int64 { return b.botID }
 
-	// Notify admins about the shutdown
-	b.NotifyAdmins("⚠️ The bot is starting.")
+func (b *Bot) SetLegacyActivityBotID(id int64) { b.legacyActivityBotID = id }
 
-	// Use UpdatesViaLongPolling to handle updates
-	updates, err := b.bot.UpdatesViaLongPolling(nil)
-	if err != nil {
-		b.logger.Error("Failed to start long polling", slog.String("error", err.Error()))
+// ConfigurePeers is called once, before polling starts. Administrative messages
+// keep using the legacy primary bot; replies can return through their origin bot.
+func (b *Bot) ConfigurePeers(primary *Bot, peers []*Bot) {
+	b.primaryBotID = primary.ID()
+	b.notificationBot = primary.bot
+	b.legacyMessageFallback = b.ID() == primary.ID()
+	b.peerBots = make(map[int64]*telego.Bot, len(peers))
+	for _, peer := range peers {
+		b.peerBots[peer.ID()] = peer.bot
+	}
+}
+
+func (b *Bot) notificationSender() *telego.Bot {
+	if b.notificationBot != nil {
+		return b.notificationBot
+	}
+	return b.bot
+}
+
+func (b *Bot) senderForBotID(id int64) *telego.Bot {
+	if id == 0 {
+		return b.notificationSender()
+	}
+	if id == b.ID() {
+		return b.bot
+	}
+	return b.peerBots[id]
+}
+
+func (b *Bot) Start() { b.StartContext(context.Background()) }
+
+func (b *Bot) StartContext(parent context.Context) {
+	ctx, cancel := context.WithCancel(parent)
+	b.lifecycleMu.Lock()
+	if b.started || b.stopRequested {
+		b.lifecycleMu.Unlock()
+		cancel()
 		return
 	}
+	b.started, b.cancel = true, cancel
+	b.lifecycleMu.Unlock()
+	defer cancel()
+	defer b.pollingLastOK.Store(0)
+	if ctx.Err() != nil {
+		return
+	}
+	b.logger.Info("Starting bot", "bot_id", b.ID())
+
+	if b.ID() == b.primaryBotID {
+		b.NotifyAdmins("⚠️ The bot is starting.")
+		defer func() {
+			// Do not delay a failed poller's exit with more requests through the
+			// same unavailable identity. Main must stop all peer pollers promptly.
+			if !b.pollingFailed.Load() {
+				b.NotifyAdmins("⚠️ The bot is stopping. Please check the server for details.")
+			}
+		}()
+	}
+
+	updates := b.updatesViaPolling(ctx)
 
 	// Create bot handler and specify from where to get updates
+	var err error
 	b.bh, err = th.NewBotHandler(b.bot, updates)
 	if err != nil {
-		b.logger.Error("Failed to create new bot handler", slog.String("error", err.Error()))
+		b.logger.Error("Failed to create new bot handler", "bot_id", b.ID())
 		return
 	}
 
-	defer b.bh.Stop()
-	defer b.bot.StopLongPolling()
+	defer func() {
+		shutdownCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		b.bh.StopWithContext(shutdownCtx)
+	}()
 
 	// Middleware in case of panic and no username
 	b.bh.Use(
@@ -124,19 +209,20 @@ func (b *Bot) Start() {
 }
 
 func (b *Bot) Stop() {
-	b.logger.Info("Stopping bot...")
-
-	// Notify admins about the shutdown
-	b.NotifyAdmins("⚠️ The bot is stopping. Please check the server for details.")
-
-	// Stop the bot handler
-	if b.bh != nil {
-		b.bh.Stop()
+	b.lifecycleMu.Lock()
+	b.stopRequested = true
+	cancel := b.cancel
+	b.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
 // NotifyAdmins sends a message to all admins
 func (b *Bot) NotifyAdmins(message string) {
+	if b.db == nil {
+		return
+	}
 	admins, err := b.db.GetAdminUsers() // Fetch admin users from the database
 	if err != nil {
 		b.logger.Error("Failed to fetch admin users", slog.String("error", err.Error()))
@@ -148,7 +234,7 @@ func (b *Bot) NotifyAdmins(message string) {
 			b.logger.Warn("Admin missing TelegramID, skipping notification", slog.String("username", admin.Username))
 			continue
 		}
-		_, err := b.bot.SendMessage(tu.Message(
+		_, err := b.notificationSender().SendMessage(tu.Message(
 			tu.ID(*admin.TelegramID),
 			message,
 		))
@@ -307,6 +393,9 @@ func (b *Bot) NotifyAdminsOfKeyRequest(username string, chatID int64, serverName
 
 // sendFormattedNotification sends a formatted notification to all admins with Markdown parsing
 func (b *Bot) sendFormattedNotification(message string) {
+	if b.db == nil {
+		return
+	}
 	admins, err := b.db.GetAdminUsers()
 	if err != nil {
 		b.logger.Error("Failed to fetch admin users", slog.String("error", err.Error()))
@@ -323,7 +412,7 @@ func (b *Bot) sendFormattedNotification(message string) {
 			message,
 		).WithParseMode(telego.ModeMarkdown)
 
-		_, err := b.bot.SendMessage(msg)
+		_, err := b.notificationSender().SendMessage(msg)
 		if err != nil {
 			b.logger.Error("Failed to notify admin",
 				slog.String("username", admin.Username),

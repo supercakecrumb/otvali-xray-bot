@@ -54,3 +54,19 @@ func TestBetaMenuDoesNotChangeCredentialActions(t *testing.T) {
 		t.Fatal("app and beta must be separate read-only navigation actions")
 	}
 }
+
+func TestStartBetaPayloadOpensBetaWithoutIssuing(t *testing.T) {
+	for _, command := range []string{"/start beta", "/start@rkn_otvali_bot beta"} {
+		issuer := &fakeStockholmIssuer{eligible: true}
+		b, caller, _ := stockholmTestBot(t, issuer)
+		option, _ := WithMiniAppURL("https://app.example/vpn", []string{"https://app.example"})
+		option(b)
+		b.handleStart(b.bot, telego.Update{Message: &telego.Message{Chat: telego.Chat{ID: 42, Type: "private"}, From: &telego.User{ID: 42}, Text: command}})
+		if len(caller.calls) != 1 || callText(t, caller.calls[0]) != betaMessage || len(issuer.issueIDs)+len(issuer.eligibleIDs) != 0 {
+			t.Fatal("the beta deep link must open the beta entry without issuing credentials")
+		}
+		if callKeyboard(t, caller.calls[0]).InlineKeyboard[0][0].WebApp.URL != "https://app.example/vpn#beta" {
+			t.Fatal("the beta payload must retain signed Mini App launch navigation")
+		}
+	}
+}

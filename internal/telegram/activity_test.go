@@ -2,6 +2,8 @@ package telegram
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -11,6 +13,43 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
 )
+
+func TestActivitySeparatesBotUpdateStreams(t *testing.T) {
+	update := telego.Update{UpdateID: 123, Message: &telego.Message{From: &telego.User{ID: 42}, Chat: telego.Chat{ID: 42, Type: "private"}, Text: "private message"}}
+	_, _, first := telegramActivity(update, 111)
+	_, _, second := telegramActivity(update, 222)
+	_, _, replay := telegramActivity(update, 111)
+	if first == "" || first == second || first != replay {
+		t.Fatal("each stable bot identity must have a distinct idempotent update stream")
+	}
+	if actor, _, _ := telegramActivity(update, 0); actor != 0 {
+		t.Fatal("unidentified bot activity must not be recorded")
+	}
+}
+
+func TestActivityLegacyOwnerSurvivesNotificationPrimarySwitch(t *testing.T) {
+	old, _, _ := stockholmTestBot(t, nil)
+	newBot, _, _ := stockholmTestBot(t, nil)
+	newBot.botID = 222
+	old.legacyActivityBotID, newBot.legacyActivityBotID = old.ID(), old.ID()
+	recorder := &fakeActivityRecorder{}
+	old.activity, newBot.activity = recorder, recorder
+	update := telego.Update{UpdateID: 123, Message: &telego.Message{From: &telego.User{ID: 42}, Chat: telego.Chat{ID: 42, Type: "private"}, Text: "private"}}
+	peers := []*Bot{old, newBot}
+	for _, primary := range peers {
+		for _, b := range peers {
+			b.ConfigurePeers(primary, peers)
+			b.recordTelegramActivity(update, "")
+		}
+	}
+	if len(recorder.calls) != 4 || recorder.calls[0].id == recorder.calls[1].id || recorder.calls[0] != recorder.calls[2] || recorder.calls[1] != recorder.calls[3] {
+		t.Fatal("notification primary switch changed activity identity or merged bot streams")
+	}
+	legacy := sha256.Sum256([]byte("telegram:123"))
+	if recorder.calls[0].id != hex.EncodeToString(legacy[:]) {
+		t.Fatal("historical update replay lost its original deduplication digest")
+	}
+}
 
 type recordedActivity struct {
 	actor            int64

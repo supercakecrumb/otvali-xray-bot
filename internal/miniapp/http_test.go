@@ -9,6 +9,8 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -61,10 +63,10 @@ func (f *fakeBackend) Key(ctx context.Context, id int64, key string) (Key, error
 type fakeHealth struct{ err error }
 
 func (f fakeHealth) PingContext(context.Context) error { return f.err }
-func newTestHandler(t *testing.T) (*handler, *fakeBackend) {
+func newTestHandler(t *testing.T, additionalTokens ...string) (*handler, *fakeBackend) {
 	t.Helper()
 	backend := &fakeBackend{}
-	value, err := NewHandler(Config{Enabled: true, AllowedOrigins: []string{testOrigin}}, testToken, backend, fakeHealth{})
+	value, err := NewHandler(Config{Enabled: true, AllowedOrigins: []string{testOrigin}}, testToken, backend, fakeHealth{}, additionalTokens...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +307,109 @@ func TestHTTPAccessDisabledAndNotFoundAreNotTransientErrors(t *testing.T) {
 		}
 		if !strings.Contains(response.Header().Get("Cache-Control"), "no-store") {
 			t.Fatal("access failure must remain private")
+		}
+	}
+}
+
+func TestHTTPConfiguredBotsUseTheExistingBoundAccount(t *testing.T) {
+	service, store, managed, legacy := fixtureService()
+	value, err := NewHandler(Config{Enabled: true, AllowedOrigins: []string{testOrigin}}, testToken, service, fakeHealth{}, secondTestToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := value.(*handler)
+	h.now = func() time.Time { return testNow }
+	var subscription string
+	for _, token := range []string{testToken, secondTestToken} {
+		for _, path := range []string{"session", "subscription"} {
+			response := request(h, "/api/miniapp/"+path, "{}", func(r *http.Request) {
+				r.Header.Set("Authorization", "tma "+initDataWithToken(42, token))
+			})
+			if response.Code != http.StatusOK {
+				t.Fatal("configured bot must reach the existing account")
+			}
+			if path == "subscription" {
+				if subscription != "" && response.Body.String() != subscription {
+					t.Fatal("changing the signing bot must not select a different subscription")
+				}
+				subscription = response.Body.String()
+			}
+		}
+	}
+	if len(store.lookups) != 4 || len(managed.issued) != 2 || legacy.calls != 0 {
+		t.Fatal("both bots must use the existing account path and only explicitly issue a subscription")
+	}
+	for _, id := range append(store.lookups, managed.issued...) {
+		if id != 42 {
+			t.Fatal("signing bot must not change the authenticated account ID")
+		}
+	}
+	store.user.TelegramID = nil
+	response := request(h, "/api/miniapp/subscription", "{}", func(r *http.Request) {
+		r.Header.Set("Authorization", "tma "+initDataWithToken(42, secondTestToken))
+	})
+	if response.Code != http.StatusForbidden || len(managed.issued) != 2 {
+		t.Fatal("a new bot must not bypass the existing account binding")
+	}
+}
+
+func TestHTTPAdditionalBotRejectsInvalidAuthBeforeBackend(t *testing.T) {
+	for _, name := range []string{"unknown_token", "tampered_user", "expired"} {
+		t.Run(name, func(t *testing.T) {
+			h, backend := newTestHandler(t, secondTestToken)
+			values, _ := url.ParseQuery(initDataWithToken(42, secondTestToken))
+			raw := ""
+			switch name {
+			case "unknown_token":
+				raw = signWithToken(values, "999999:unknown-synthetic-token")
+			case "tampered_user":
+				values.Set("user", `{"id":99}`)
+				raw = values.Encode()
+			case "expired":
+				values.Set("auth_date", strconv.FormatInt(testNow.Add(-maxInitDataAge-time.Second).Unix(), 10))
+				raw = signWithToken(values, secondTestToken)
+			}
+			response := request(h, "/api/miniapp/subscription", "{}", func(r *http.Request) {
+				r.Header.Set("Authorization", "tma "+raw)
+			})
+			if response.Code != http.StatusUnauthorized || response.Body.String() != "{\"error\":{\"code\":\"unauthorized\"}}\n" || len(backend.calls) != 0 {
+				t.Fatal("invalid authentication must return a generic error without invoking backend")
+			}
+		})
+	}
+}
+
+func TestHTTPConfiguredBotsShareTheAccountRateLimit(t *testing.T) {
+	h, backend := newTestHandler(t, secondTestToken)
+	tokens := []string{testToken, secondTestToken}
+	for i := 0; i < 21; i++ {
+		response := request(h, "/api/miniapp/session", "{}", func(r *http.Request) {
+			r.Header.Set("Authorization", "tma "+initDataWithToken(42, tokens[i%len(tokens)]))
+		})
+		want := http.StatusOK
+		if i == 20 {
+			want = http.StatusTooManyRequests
+		}
+		if response.Code != want {
+			t.Fatal("switching bots must not reset the account rate limit")
+		}
+	}
+	if len(backend.calls) != 20 {
+		t.Fatal("rate limited request reached backend")
+	}
+}
+
+func TestHTTPAcceptedTokensAreConfiguredAndCopied(t *testing.T) {
+	config := Config{Enabled: true, AllowedOrigins: []string{testOrigin}}
+	additional := []string{secondTestToken, testToken, secondTestToken}
+	h, _ := newTestHandler(t, additional...)
+	additional[0] = "999999:unconfigured-synthetic-token"
+	if len(h.tokens) != 2 || h.tokens[0] != testToken || h.tokens[1] != secondTestToken {
+		t.Fatal("accepted token set must be copied and deduplicated")
+	}
+	for _, additional := range []string{"", " \t"} {
+		if _, err := NewHandler(config, testToken, &fakeBackend{}, fakeHealth{}, additional); err == nil || err.Error() != "invalid Mini App configuration" {
+			t.Fatal("empty configured token must fail without exposing token contents")
 		}
 	}
 }
