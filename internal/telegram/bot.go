@@ -237,10 +237,10 @@ func (b *Bot) NotifyAdminsOfCommand(username string, chatID int64, command strin
 			"💬 Команда: `%s`\n"+
 			"📋 Аргументы: %s\n"+
 			"🕐 Время: %s",
-		username,
+		escapeMarkdown(username),
 		chatID,
 		command,
-		argsText,
+		escapeMarkdown(argsText),
 		timestamp,
 	)
 
