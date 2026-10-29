@@ -1,7 +1,9 @@
 package database
 
 import (
+	"context"
 	"log/slog"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -37,5 +39,15 @@ func NewDB(connectionString string, logger *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
-	return &DB{Conn: db}, nil
+	if err := db.AutoMigrate(&BetaReport{}); err != nil {
+		logger.Error("Failed to migrate beta feedback schema")
+		return nil, err
+	}
+
+	wrapped := &DB{Conn: db}
+	if err := wrapped.InitActivity(context.Background(), time.Now()); err != nil {
+		logger.Error("Failed to initialize activity schema")
+		return nil, err
+	}
+	return wrapped, nil
 }

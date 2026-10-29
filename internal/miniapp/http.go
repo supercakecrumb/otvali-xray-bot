@@ -115,7 +115,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
-	known := r.URL.Path == "/api/miniapp/session" || r.URL.Path == "/api/miniapp/subscription" || r.URL.Path == "/api/miniapp/keys" || r.URL.Path == "/api/miniapp/key"
+	known := betaPath(r.URL.Path) || r.URL.Path == "/api/miniapp/session" || r.URL.Path == "/api/miniapp/subscription" || r.URL.Path == "/api/miniapp/keys" || r.URL.Path == "/api/miniapp/key"
 	if !known {
 		writeError(w, 404, "not_found")
 		return
@@ -167,6 +167,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request")
 		return
 	}
+	if betaPath(r.URL.Path) {
+		select {
+		case h.inFlight <- struct{}{}:
+			defer func() { <-h.inFlight }()
+		default:
+			writeError(w, 429, "rate_limited")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		h.serveBeta(ctx, w, r, actorID)
+		return
+	}
 	var body struct {
 		ID string `json:"id"`
 	}
@@ -200,6 +213,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeBackendError(w, err)
 			return
 		}
+		h.recordActivity(ctx, actorID, "miniapp_session")
 		writeJSON(w, 200, map[string]Account{"account": account})
 	case "/api/miniapp/subscription":
 		sub, err := h.backend.Subscription(ctx, actorID)
@@ -208,6 +222,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sub.QRCode = credentialQRCode(sub.URL)
+		h.recordActivity(ctx, actorID, "miniapp_subscription_response")
 		writeJSON(w, 200, map[string]Subscription{"subscription": sub})
 	case "/api/miniapp/keys":
 		keys, err := h.backend.Keys(ctx, actorID)
@@ -223,6 +238,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if keys == nil {
 			keys = []Key{}
 		}
+		h.recordActivity(ctx, actorID, "miniapp_keys")
 		writeJSON(w, 200, map[string][]Key{"keys": keys})
 	case "/api/miniapp/key":
 		key, err := h.backend.Key(ctx, actorID, body.ID)
@@ -231,6 +247,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		key.QRCode = credentialQRCode(key.URL)
+		h.recordActivity(ctx, actorID, "miniapp_key_response")
 		writeJSON(w, 200, map[string]Key{"key": key})
 	}
 }
@@ -272,6 +289,15 @@ func (h *handler) allow(id int64) bool {
 
 func writeBackendError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrInvalidRequest):
+		writeError(w, 400, "invalid_request")
+	case errors.Is(err, ErrSensitiveData):
+		writeError(w, 400, "sensitive_data")
+	case errors.Is(err, ErrConflict):
+		writeError(w, 409, "conflict")
+	case errors.Is(err, ErrRateLimited):
+		w.Header().Set("Retry-After", "3600")
+		writeError(w, 429, "rate_limited")
 	case errors.Is(err, ErrAccessDisabled):
 		writeError(w, 403, "access_disabled")
 	case errors.Is(err, ErrForbidden):
