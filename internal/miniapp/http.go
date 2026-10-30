@@ -219,7 +219,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 429, "rate_limited")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	timeout := 25 * time.Second
+	if r.URL.Path == telegramProxyAllPath {
+		// Issuing every route in sequence may wait for provider runtime
+		// admission; stay below the server's 35-second write timeout.
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	if telegramProxyPath(r.URL.Path) {
 		h.serveTelegramProxy(ctx, w, r, actorID, body.ID)

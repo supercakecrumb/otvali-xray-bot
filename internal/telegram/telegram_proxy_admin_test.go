@@ -79,7 +79,7 @@ func TestRevokeTelegramRequiresBoundAdminPrivateChatAndExplicitConfirmation(t *t
 		b.botID = botID
 		data := proxyRevokeConfirmation(t, b, caller, "/revoke_telegram 7 all")
 		text := callText(t, caller.calls[0])
-		if len(provider.revocations) != 0 || len(provider.issueIDs)+len(provider.listIDs) != 0 || !strings.Contains(text, "@target&lt;escaped&gt;") || !strings.Contains(text, "4242") || !strings.Contains(text, "5 минут") || len(data) > 64 {
+		if len(provider.revocations) != 0 || len(provider.issueIDs) != 0 || !strings.Contains(text, "@target&lt;escaped&gt;") || !strings.Contains(text, "4242") || !strings.Contains(text, "5 минут") || len(data) > 64 {
 			t.Fatal("preview must show escaped exact account and require explicit confirmation")
 		}
 		for _, route := range []string{"finland", "stockholm", "msk-finland", "msk-stockholm"} {
@@ -95,7 +95,7 @@ func TestRevokeTelegramRequiresBoundAdminPrivateChatAndExplicitConfirmation(t *t
 			}
 			routes = append(routes, revoke.route)
 		}
-		if !reflect.DeepEqual(routes, []string{"finland", "stockholm", "msk-finland", "msk-stockholm"}) || !provider.bounded || !reflect.DeepEqual(store.lookups, []int64{7, 7}) || len(provider.issueIDs)+len(provider.listIDs) != 0 {
+		if !reflect.DeepEqual(routes, []string{"finland", "stockholm", "msk-finland", "msk-stockholm"}) || !provider.bounded || !reflect.DeepEqual(store.lookups, []int64{7, 7}) || len(provider.issueIDs) != 0 {
 			t.Fatal("confirmation must check target again and only revoke exact selected routes once")
 		}
 		b.handleRevokeTelegramCallback(b.bot, proxyUpdate(data))

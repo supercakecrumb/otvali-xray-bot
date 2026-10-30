@@ -16,6 +16,15 @@ import (
 	"time"
 )
 
+// Telemt persists a new user first and admits it to runtime asynchronously,
+// so a just-created user reports in_runtime=false for a few seconds. Issue
+// waits for admission with a short read-only backoff inside its deadline.
+const (
+	runtimeWait      = 8 * time.Second
+	runtimePollStart = 250 * time.Millisecond
+	runtimePollMax   = time.Second
+)
+
 type Service struct {
 	config    Config
 	store     Store
@@ -23,6 +32,8 @@ type Service struct {
 	endpoints map[string]EndpointConfig
 	aead      cipher.AEAD
 	locks     [64]sync.Mutex
+
+	runtimeWait, runtimePollStart, runtimePollMax time.Duration
 }
 
 func NewService(c Config, store Store, client *http.Client) (*Service, error) {
@@ -42,7 +53,7 @@ func NewServiceWithClients(c Config, store Store, clients map[string]*http.Clien
 	if store == nil {
 		return nil, ErrUnavailable
 	}
-	s := &Service{config: c, store: store, providers: map[string]API{}, endpoints: map[string]EndpointConfig{}}
+	s := &Service{config: c, store: store, providers: map[string]API{}, endpoints: map[string]EndpointConfig{}, runtimeWait: runtimeWait, runtimePollStart: runtimePollStart, runtimePollMax: runtimePollMax}
 	s.config.SecretKey = append([]byte(nil), c.SecretKey...)
 	s.config.Endpoints = append([]EndpointConfig(nil), c.Endpoints...)
 	s.config.Providers = nil // API authentication remains solely in the client.
@@ -207,7 +218,8 @@ func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string
 		if err != nil {
 			return err
 		}
-		remote, err := s.providers[ep.ProviderID].GetUser(ctx, g.ExternalID)
+		api := s.providers[ep.ProviderID]
+		remote, err := api.GetUser(ctx, g.ExternalID)
 		if errors.Is(err, ErrNotFound) {
 			if g.State == StateActive {
 				// A disk-backed provider 404 does not prove runtime admission
@@ -217,8 +229,12 @@ func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string
 				outcome = ErrInactive
 				return nil
 			}
-			remote, err = s.providers[ep.ProviderID].CreateUser(ctx, g.ExternalID, secret)
+			remote, err = api.CreateUser(ctx, g.ExternalID, secret)
 		}
+		if err != nil {
+			return err
+		}
+		remote, err = s.awaitRuntime(ctx, api, *g, secret, remote)
 		if err != nil {
 			return err
 		}
@@ -252,6 +268,83 @@ func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string
 		return Credential{}, outcome
 	}
 	return result, nil
+}
+
+// awaitRuntime polls a matching, enabled user that Telemt has not yet admitted
+// to runtime. It only reads: every observation returns to Issue's existing
+// checks, so a mismatch stays a conflict and a disabled user is fenced. The
+// grant row stays locked, and the wait is bounded by runtimeWait and ctx.
+func (s *Service) awaitRuntime(ctx context.Context, api API, g Grant, secret string, remote RemoteUser) (RemoteUser, error) {
+	deadline := time.Now().Add(s.runtimeWait)
+	delay := s.runtimePollStart
+	for remoteMatches(remote, g, secret) && remote.Enabled && !remote.InRuntime {
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			break
+		}
+		if delay < wait {
+			wait = delay
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return RemoteUser{}, ErrUnavailable
+		case <-timer.C:
+		}
+		next, err := api.GetUser(ctx, g.ExternalID)
+		if errors.Is(err, ErrNotFound) {
+			// Leave the grant unchanged; the next Issue applies the existing
+			// pending/active 404 rules instead of acting on a mid-wait read.
+			return RemoteUser{}, ErrUnavailable
+		}
+		if err != nil {
+			return RemoteUser{}, err
+		}
+		remote = next
+		if delay *= 2; delay > s.runtimePollMax {
+			delay = s.runtimePollMax
+		}
+	}
+	return remote, nil
+}
+
+// IssueAll issues every configured route for one user in configuration order.
+// Each route goes through Issue, its per-user lock and all grant guards; the
+// calls are sequential and IssueAll itself holds no lock. Revoked or disabled
+// routes are omitted. Other route failures are reported by endpoint ID as
+// unavailable. It fails when the user is not eligible, when every route is
+// inactive (ErrInactive), or when no route could be issued (ErrUnavailable).
+func (s *Service) IssueAll(ctx context.Context, telegramID int64) ([]Credential, []string, error) {
+	if _, err := s.userID(ctx, telegramID); err != nil {
+		return nil, nil, err
+	}
+	issued := make([]Credential, 0, len(s.config.Endpoints))
+	unavailable := []string{}
+	for _, ep := range s.config.Endpoints {
+		if ctx.Err() != nil {
+			unavailable = append(unavailable, ep.ID)
+			continue
+		}
+		credential, err := s.Issue(ctx, telegramID, ep.ID)
+		switch {
+		case err == nil:
+			issued = append(issued, credential)
+		case errors.Is(err, ErrNotEligible):
+			return nil, nil, err
+		case errors.Is(err, ErrInactive):
+			// Revoked or disabled routes are omitted, never offered for retry.
+		default:
+			unavailable = append(unavailable, ep.ID)
+		}
+	}
+	if len(issued) == 0 {
+		if len(unavailable) == 0 {
+			return nil, nil, ErrInactive
+		}
+		return nil, nil, ErrUnavailable
+	}
+	return issued, unavailable, nil
 }
 
 // Revoke writes the durable fence before touching the provider. A lost reply

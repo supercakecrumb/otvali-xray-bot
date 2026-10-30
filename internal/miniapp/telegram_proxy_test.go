@@ -20,6 +20,25 @@ type proxyIssuerFake struct {
 	endpointID     string
 	err            error
 	credential     telegramproxy.Credential
+	// IssueAll results; nil all returns every synthetic route.
+	allIssued   []int64
+	all         []telegramproxy.Credential
+	unavailable []string
+	allBudget   time.Duration
+}
+
+func (f *proxyIssuerFake) IssueAll(ctx context.Context, actor int64) ([]telegramproxy.Credential, []string, error) {
+	f.allIssued = append(f.allIssued, actor)
+	if deadline, ok := ctx.Deadline(); ok {
+		f.allBudget = time.Until(deadline)
+	}
+	if f.err != nil {
+		return nil, nil, f.err
+	}
+	if f.all == nil {
+		return syntheticProxyAll(), []string{}, nil
+	}
+	return f.all, f.unavailable, nil
 }
 
 func (f *proxyIssuerFake) List(_ context.Context, actor int64) ([]telegramproxy.Endpoint, error) {

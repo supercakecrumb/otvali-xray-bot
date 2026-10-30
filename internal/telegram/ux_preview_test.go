@@ -14,6 +14,7 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/miniapp"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/telegramproxy"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/vpnmonitor"
 )
 
@@ -137,6 +138,20 @@ func TestExportUXPreview(t *testing.T) {
 	} {
 		helpScreen(page.id, page.callback)
 	}
+	// The "telegram" screen above is the unconfigured stub. With the private
+	// provider configured, opening Telegram issues every route at once.
+	proxy := proxyFixture()
+	WithTelegramProxy(proxy)(b)
+	b.handleTelegramProxy(b.bot, qrCommand("/telegram"))
+	save("telegram_proxies")
+	proxy.credentials, proxy.unavailable = proxy.credentials[:3], []string{"msk-stockholm"}
+	b.handleTelegramProxyCallback(b.bot, callback(CallbackTelegramProxy))
+	save("telegram_proxies_partial")
+	proxy.err = telegramproxy.ErrUnavailable
+	b.handleTelegramProxyCallback(b.bot, callback(CallbackTelegramProxy))
+	save("telegram_proxies_error")
+	b.telegramProxy = nil
+
 	b.handleStockholmRoutingGuide(b.bot, callback(CallbackStockholmRouting))
 	save("routing")
 	b.handleStockholmHappRouting(b.bot, callback(CallbackStockholmHappRouting))
@@ -263,6 +278,7 @@ func TestExportUXPreview(t *testing.T) {
 		Commands: map[string]string{
 			"/start": "home", "/help": "help", "/get_key": "access", "/qr": "qr_menu", "/qr_subscription": "qr_subscription",
 			"/qr_key": "qr_keys", "/help_setup": "setup", "/status": "network_status", "/account": "account_ready", "/beta": "feedback", "/invite": "invite_usage",
+			"/telegram": "telegram_proxies",
 		},
 		CallbackRoutes: map[string]string{
 			CallbackHelpBack: "home", CallbackHelpSupport: "help", CallbackHelpVPNSetup: "setup", CallbackStockholmGuide: "setup", CallbackHelpVPNDevices: "setup_devices",
@@ -273,10 +289,11 @@ func TestExportUXPreview(t *testing.T) {
 			CallbackStockholmHappRoutingLink: "routing_happ_link", CallbackStockholmIncyRoutingLink: "routing_incy_link",
 			CallbackQRMenu: "qr_menu", CallbackQRKeys: "qr_keys", CallbackQRSubscription: "qr_subscription", CallbackQRManagedPrefix + managedID: "qr_managed", CallbackQRLegacyPrefix + "8": "qr_legacy",
 			CallbackNetworkStatus: "network_status", CallbackNetworkDetails: "network_details", CallbackAccountStatus: "account_ready",
+			CallbackTelegramProxy: "telegram_proxies", CallbackTelegramProxyIssue + "finland": "telegram_proxies",
 		},
 		Labels: map[string]string{
 			"home": "Главная", "help": "Помощь", "setup": "Установка", "setup_devices": "Выбор устройства", "windows": "Windows", "macos": "macOS", "android": "Android", "ios": "iOS", "linux": "Linux",
-			"how_it_works": "Как это работает", "telegram": "Telegram", "routing": "Маршрутизация", "routing_happ": "Правила Happ", "routing_incy": "Правила INCY", "routing_happ_link": "Ссылка правил Happ", "routing_incy_link": "Ссылка правил INCY",
+			"how_it_works": "Как это работает", "telegram": "Telegram", "telegram_proxies": "Прокси Telegram", "telegram_proxies_partial": "Часть прокси недоступна", "telegram_proxies_error": "Прокси недоступны", "routing": "Маршрутизация", "routing_happ": "Правила Happ", "routing_incy": "Правила INCY", "routing_happ_link": "Ссылка правил Happ", "routing_incy_link": "Ссылка правил INCY",
 			"access": "Подписка и ключи", "subscription": "Подписка", "subscription_missing": "Подписка недоступна", "subscription_disabled": "Доступ отключён", "subscription_error": "Ошибка подписки",
 			"keys": "Все отдельные ключи", "keys_legacy": "Прежний ключ", "keys_empty": "Ключей пока нет", "keys_error": "Список ключей недоступен", "key_managed": "Отдельный ключ", "key_legacy": "Ключ Финляндии", "key_error": "Ошибка ключа",
 			"qr_menu": "QR-коды", "qr_keys": "Выбор ключа для QR", "qr_subscription": "QR подписки", "qr_managed": "QR отдельного ключа", "qr_legacy": "QR прежнего ключа", "qr_error": "Ошибка QR",

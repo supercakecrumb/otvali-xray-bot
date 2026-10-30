@@ -341,7 +341,24 @@ The short bot navigation and opt-in offline screen exporter are documented in
 [`docs/ux-flow.md`](docs/ux-flow.md).
 
 `/telegram`, `/start telegram` and the home menu's **Telegram** entry use the
-existing configured private proxy provider. Opening the section lists authorized
-routes without issuing access; selecting a route retains the provider's existing
-personal issuance and revocation rules. Confirm proxy activation in Telegram.
-This navigation release does not change provider configuration or infrastructure.
+existing configured private proxy provider. Opening the section issues the
+user's personal link for every authorized route at once and shows one message
+with one launch button per route, so several proxies can be added and switched
+if one stops working. Individually revoked routes are omitted; temporarily
+unavailable routes are summarized with a refresh button. Route buttons from
+earlier messages open the same view. Issuance keeps the provider's existing
+personal grant and revocation rules and is not a connection check: confirm
+proxy activation in Telegram.
+
+Telemt admits a newly created user to runtime asynchronously. Issuance polls
+the provider read-only (250 ms doubling to 1 s, at most eight seconds, within
+the existing per-route deadline) before activating a grant. A user disabled or
+changed during the wait keeps the existing revoking or conflict outcome.
+
+The Mini App can request every route with `POST /api/miniapp/telegram/proxies/all`
+and body `{}`. It returns `{"proxies":[{"endpoint_id":"finland","name":"…","url":"https://t.me/proxy?…"}],"unavailable":["msk-stockholm"]}`
+in configuration order when at least one route was issued, `503 unavailable`
+when none could be issued, and the existing `401`/`403` errors for
+unauthenticated, unbound, ineligible or revoked users. It shares the
+authentication, exact-origin CORS, no-store, rate, method and body guards of
+`POST /api/miniapp/telegram/proxy`. Links must not be logged, cached or stored.

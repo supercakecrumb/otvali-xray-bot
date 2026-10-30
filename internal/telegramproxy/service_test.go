@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type memoryStore struct {
@@ -96,9 +97,18 @@ type memoryAPI struct {
 	users                        map[string]RemoteUser
 	creates, disables, gets      int
 	uncertainCreate, failDisable bool
+	failCreate                   bool
+	// runtimeAfter models Telemt's asynchronous admission: 0 admits on
+	// create, N>0 admits on the Nth read after create, N<0 never admits.
+	runtimeAfter int
+	pending      map[string]int
+	// onRead may change a stored user before a read returns it.
+	onRead func(*RemoteUser)
 }
 
-func newMemoryAPI() *memoryAPI { return &memoryAPI{users: map[string]RemoteUser{}} }
+func newMemoryAPI() *memoryAPI {
+	return &memoryAPI{users: map[string]RemoteUser{}, pending: map[string]int{}}
+}
 func (m *memoryAPI) GetUser(_ context.Context, name string) (RemoteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -107,19 +117,37 @@ func (m *memoryAPI) GetUser(_ context.Context, name string) (RemoteUser, error) 
 	if !ok {
 		return RemoteUser{}, ErrNotFound
 	}
+	if left, waiting := m.pending[name]; waiting && left > 0 {
+		if left == 1 {
+			delete(m.pending, name)
+			u.InRuntime = true
+		} else {
+			m.pending[name] = left - 1
+		}
+	}
+	if m.onRead != nil {
+		m.onRead(&u)
+	}
+	m.users[name] = u
 	return u, nil
 }
 func (m *memoryAPI) CreateUser(_ context.Context, name, secret string) (RemoteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.creates++
+	if m.failCreate {
+		return RemoteUser{}, ErrUnavailable
+	}
 	if old, ok := m.users[name]; ok {
 		if old.Secret != secret {
 			return RemoteUser{}, ErrConflict
 		}
 		return old, nil
 	}
-	u := RemoteUser{Name: name, Secret: secret, Enabled: true, InRuntime: true}
+	u := RemoteUser{Name: name, Secret: secret, Enabled: true, InRuntime: m.runtimeAfter == 0}
+	if m.runtimeAfter != 0 {
+		m.pending[name] = m.runtimeAfter
+	}
 	m.users[name] = u
 	if m.uncertainCreate {
 		m.uncertainCreate = false
@@ -155,6 +183,7 @@ func fixtureService(t *testing.T, store *memoryStore) (*Service, map[string]*mem
 	for id, api := range apis {
 		s.providers[id] = api
 	}
+	s.runtimeWait, s.runtimePollStart, s.runtimePollMax = 200*time.Millisecond, time.Millisecond, 4*time.Millisecond
 	return s, apis
 }
 

@@ -151,7 +151,8 @@ func TestClientExistingCredentialNeverReenabledOrRotated(t *testing.T) {
 	}{
 		{"disabled", false, true, testRemoteSecret, ErrInactive},
 		{"mismatch", true, true, "ffffffffffffffffffffffffffffffff", ErrConflict},
-		{"pending", true, false, testRemoteSecret, ErrUnavailable},
+		// Runtime admission is asynchronous; Service waits before issuing.
+		{"pending", true, false, testRemoteSecret, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -163,11 +164,48 @@ func TestClientExistingCredentialNeverReenabledOrRotated(t *testing.T) {
 				}
 				writeEnvelope(w, 200, testUser("otvali_test", tt.secret, tt.enabled, tt.runtime), testRevision)
 			}, 0)
-			_, err := client.CreateUser(context.Background(), "otvali_test", testRemoteSecret)
+			user, err := client.CreateUser(context.Background(), "otvali_test", testRemoteSecret)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("got %v want %v", err, tt.want)
 			}
+			if tt.want == nil && (user.Secret != testRemoteSecret || !user.Enabled || user.InRuntime != tt.runtime) {
+				t.Fatal("matching user must report its actual runtime admission")
+			}
 		})
+	}
+}
+
+func TestClientCreateReportsPendingRuntimeWithoutSecondWrite(t *testing.T) {
+	var mu sync.Mutex
+	exists := false
+	posts := 0
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if serveVersion(w, r) {
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/users" {
+			posts++
+			exists = true
+			writeEnvelope(w, 201, map[string]any{"user": testUser("otvali_test", testRemoteSecret, true, false), "secret": testRemoteSecret}, testNextRevision)
+			return
+		}
+		if !exists {
+			writeFailure(w, 404, "not_found")
+			return
+		}
+		// Telemt has persisted the user but not yet applied it to runtime.
+		writeEnvelope(w, 200, testUser("otvali_test", testRemoteSecret, true, false), testNextRevision)
+	}, 0)
+	for i := 0; i < 2; i++ {
+		user, err := client.CreateUser(context.Background(), "otvali_test", testRemoteSecret)
+		if err != nil || user.Secret != testRemoteSecret || !user.Enabled || user.InRuntime {
+			t.Fatalf("pending runtime must be reported, not hidden or retried: %v", err)
+		}
+	}
+	if posts != 1 {
+		t.Fatalf("created %d times", posts)
 	}
 }
 

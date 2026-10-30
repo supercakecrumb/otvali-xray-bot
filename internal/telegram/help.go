@@ -1,11 +1,9 @@
 package telegram
 
 import (
-	"context"
 	"errors"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
@@ -32,7 +30,7 @@ const (
 const helpMessage = "Otvali VPN\n\nОдна подписка для Happ и INCY. Добавьте её в приложение и подключитесь."
 const supportText = "<b>Помощь</b>\n\nПроверьте VPN или свой доступ.\nНе помогло — напишите сюда."
 const installationText = "<b>Установка</b>\n\n1. Установите Happ или INCY.\n2. Добавьте ссылку как подписку.\n3. Разрешите VPN и подключитесь в приложении.\n\nНужны подробности? Выберите раздел ниже."
-const telegramHelpText = "<b>Telegram</b>\n\nПрокси-ссылка ещё не настроена. После проверки здесь появится «Подключить Telegram»; включение подтвердите вы.\n\nПока используйте VPN в Happ или INCY."
+const telegramHelpText = "<b>Telegram</b>\n\nПрокси-ссылка ещё не настроена. После проверки здесь появятся ссылки на прокси; включение подтвердите вы.\n\nПока используйте VPN в Happ или INCY."
 
 var (
 	helpKeyboard = tu.InlineKeyboard(
@@ -210,12 +208,11 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 		text = howItWorksText
 		keyboard = helpVpnBackKeyboard
 	case CallbackHelpTelegram:
-		text = telegramHelpText
 		if b.telegramProxy != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			text, keyboard = b.telegramProxyMenu(ctx, update.CallbackQuery.From.ID)
-			cancel()
+			b.deliverTelegramProxies(bot, update, update.CallbackQuery.From.ID)
+			return
 		}
+		text = telegramHelpText
 	case CallbackHelpBeta:
 		text, keyboard = b.betaEntry()
 

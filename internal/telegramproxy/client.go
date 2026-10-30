@@ -19,7 +19,9 @@ import (
 )
 
 // API is deliberately limited to individual credentials; it cannot rotate,
-// enable, delete, or replace a provider's configuration.
+// enable, delete, or replace a provider's configuration. CreateUser may return
+// a matching enabled user with InRuntime=false; callers must not issue a link
+// until a read reports runtime admission.
 type API interface {
 	GetUser(context.Context, string) (RemoteUser, error)
 	CreateUser(context.Context, string, string) (RemoteUser, error)
@@ -218,15 +220,15 @@ func (c *Client) DisableUser(ctx context.Context, name string) (RemoteUser, erro
 	return result, nil
 }
 
+// activeMatchingUser accepts a matching enabled user even before Telemt admits
+// it to runtime. Admission is asynchronous after a create; Service waits for
+// InRuntime and never issues a link without it.
 func activeMatchingUser(user RemoteUser, secret string) (RemoteUser, error) {
 	if !sameSecret(user.Secret, secret) {
 		return RemoteUser{}, ErrConflict
 	}
 	if !user.Enabled {
 		return RemoteUser{}, ErrInactive
-	}
-	if !user.InRuntime {
-		return RemoteUser{}, ErrUnavailable
 	}
 	return user, nil
 }

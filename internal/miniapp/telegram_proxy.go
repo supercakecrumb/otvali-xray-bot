@@ -13,12 +13,16 @@ import (
 type TelegramProxyBackend interface {
 	TelegramProxies(context.Context, int64) ([]telegramproxy.Endpoint, error)
 	TelegramProxy(context.Context, int64, string) (telegramproxy.Credential, error)
+	TelegramProxyAll(context.Context, int64) ([]telegramproxy.Credential, []string, error)
 }
 
 type TelegramProxyIssuer interface {
 	List(context.Context, int64) ([]telegramproxy.Endpoint, error)
 	Issue(context.Context, int64, string) (telegramproxy.Credential, error)
+	IssueAll(context.Context, int64) ([]telegramproxy.Credential, []string, error)
 }
+
+const telegramProxyAllPath = "/api/miniapp/telegram/proxies/all"
 
 // SetTelegramProxy is startup wiring; do not change providers during requests.
 func (s *Service) SetTelegramProxy(issuer TelegramProxyIssuer) { s.telegramProxy = issuer }
@@ -57,6 +61,54 @@ func (s *Service) TelegramProxy(ctx context.Context, actor int64, id string) (te
 	return credential, nil
 }
 
+// TelegramProxyAll issues every route for the bound actor in configuration
+// order. At least one credential is returned on success; routes that could
+// not be issued now are listed by endpoint ID. Revoked routes are omitted.
+func (s *Service) TelegramProxyAll(ctx context.Context, actor int64) ([]telegramproxy.Credential, []string, error) {
+	if _, err := s.bound(ctx, actor); err != nil {
+		return nil, nil, err
+	}
+	if s.telegramProxy == nil {
+		return nil, nil, ErrUnavailable
+	}
+	credentials, unavailable, err := s.telegramProxy.IssueAll(ctx, actor)
+	if err != nil {
+		return nil, nil, telegramProxyError(err)
+	}
+	credentials, unavailable = sanitizeTelegramProxies(credentials, unavailable)
+	if len(credentials) == 0 {
+		return nil, nil, ErrUnavailable
+	}
+	return credentials, unavailable, nil
+}
+
+// sanitizeTelegramProxies never trusts an issuer: unknown or duplicate routes
+// and malformed links are dropped, and a dropped known route is reported as
+// unavailable. Both results are non-nil so they encode as JSON arrays.
+func sanitizeTelegramProxies(credentials []telegramproxy.Credential, unavailable []string) ([]telegramproxy.Credential, []string) {
+	issued := make([]telegramproxy.Credential, 0, len(credentials))
+	missing := []string{}
+	seen := map[string]bool{}
+	for _, credential := range credentials {
+		if !validTelegramProxyID(credential.EndpointID) || seen[credential.EndpointID] {
+			continue
+		}
+		seen[credential.EndpointID] = true
+		if !telegramproxy.ValidCredentialURL(credential.URL) {
+			missing = append(missing, credential.EndpointID)
+			continue
+		}
+		issued = append(issued, telegramproxy.Credential{EndpointID: credential.EndpointID, Name: credential.Name, URL: credential.URL})
+	}
+	for _, id := range unavailable {
+		if validTelegramProxyID(id) && !seen[id] {
+			seen[id] = true
+			missing = append(missing, id)
+		}
+	}
+	return issued, missing
+}
+
 func telegramProxyError(err error) error {
 	switch {
 	case errors.Is(err, telegramproxy.ErrNotEligible):
@@ -80,7 +132,7 @@ func validTelegramProxyID(id string) bool {
 }
 
 func telegramProxyPath(path string) bool {
-	return path == "/api/miniapp/telegram/proxies" || path == "/api/miniapp/telegram/proxy"
+	return path == "/api/miniapp/telegram/proxies" || path == "/api/miniapp/telegram/proxy" || path == telegramProxyAllPath
 }
 
 func (h *handler) serveTelegramProxy(ctx context.Context, w http.ResponseWriter, r *http.Request, actor int64, id string) {
@@ -107,6 +159,21 @@ func (h *handler) serveTelegramProxy(ctx context.Context, w http.ResponseWriter,
 		}
 		h.recordActivity(ctx, actor, "miniapp_telegram_proxies")
 		writeJSON(w, http.StatusOK, map[string]any{"proxies": metadata})
+		return
+	}
+	if r.URL.Path == telegramProxyAllPath {
+		credentials, unavailable, err := backend.TelegramProxyAll(ctx, actor)
+		if err != nil {
+			writeBackendError(w, err)
+			return
+		}
+		credentials, unavailable = sanitizeTelegramProxies(credentials, unavailable)
+		if len(credentials) == 0 {
+			writeBackendError(w, ErrUnavailable)
+			return
+		}
+		h.recordActivity(ctx, actor, "miniapp_telegram_proxy_response")
+		writeJSON(w, http.StatusOK, map[string]any{"proxies": credentials, "unavailable": unavailable})
 		return
 	}
 	credential, err := backend.TelegramProxy(ctx, actor, id)
