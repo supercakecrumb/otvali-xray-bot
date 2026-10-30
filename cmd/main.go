@@ -16,7 +16,9 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/miniapp"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/runtimehealth"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/sshapi"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/telegram"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/telegramproxy"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/vpnmonitor"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/x3ui"
 	"github.com/supercakecrumb/otvali-xray-bot/pkg/config"
@@ -103,6 +105,31 @@ func run() int {
 		log.Info("Stockholm subscriptions enabled", "eligible_ids", len(cfg.Stockholm.AllowedTelegramIDs))
 	}
 	accountService := miniapp.NewService(db, managed, serverHandler)
+	if cfg.TelegramProxy.Enabled {
+		clients := make(map[string]*http.Client)
+		for _, provider := range cfg.TelegramProxy.Providers {
+			transportConfig, present := cfg.TelegramProxySSH[provider.ID]
+			if !present {
+				log.Error("Missing Telegram proxy management transport")
+				return 1
+			}
+			client, closer, err := sshapi.NewClient(transportConfig)
+			if err != nil {
+				log.Error("Invalid Telegram proxy management transport")
+				return 1
+			}
+			defer closer.Close()
+			clients[provider.ID] = client
+		}
+		service, err := telegramproxy.NewServiceWithClients(cfg.TelegramProxy, db, clients)
+		if err != nil {
+			log.Error("Telegram proxy initialization failed")
+			return 1
+		}
+		accountService.SetTelegramProxy(service)
+		botOptions = append(botOptions, telegram.WithTelegramProxy(service))
+		log.Info("Telegram proxy credential service enabled", "routes", len(cfg.TelegramProxy.Endpoints))
+	}
 	botOptions = append(botOptions, telegram.WithAccountStatus(accountService))
 	var monitor *vpnmonitor.Service
 	if cfg.VPNMonitor.Enabled {

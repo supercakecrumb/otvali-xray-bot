@@ -339,3 +339,9 @@ A managed-provider failure leaves the legacy Finland action independent.
 
 The short bot navigation and opt-in offline screen exporter are documented in
 [`docs/ux-flow.md`](docs/ux-flow.md).
+
+`/telegram`, `/start telegram` and the home menu's **Telegram** entry use the
+existing configured private proxy provider. Opening the section lists authorized
+routes without issuing access; selecting a route retains the provider's existing
+personal issuance and revocation rules. Confirm proxy activation in Telegram.
+This navigation release does not change provider configuration or infrastructure.

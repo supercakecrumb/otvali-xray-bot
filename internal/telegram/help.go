@@ -1,9 +1,11 @@
 package telegram
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
@@ -209,6 +211,11 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 		keyboard = helpVpnBackKeyboard
 	case CallbackHelpTelegram:
 		text = telegramHelpText
+		if b.telegramProxy != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			text, keyboard = b.telegramProxyMenu(ctx, update.CallbackQuery.From.ID)
+			cancel()
+		}
 	case CallbackHelpBeta:
 		text, keyboard = b.betaEntry()
 

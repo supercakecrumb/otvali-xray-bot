@@ -147,3 +147,51 @@ func TestSupportAndDevicePickersNeverReadPrivateServices(t *testing.T) {
 		}
 	}
 }
+
+func TestUnifiedTelegramEntryPreservesConfiguredProvider(t *testing.T) {
+	provider := proxyFixture()
+	b, caller, _ := stockholmTestBot(t, nil)
+	WithTelegramProxy(provider)(b)
+	update := stockholmUpdate()
+	update.CallbackQuery.Data = CallbackHelpTelegram
+	b.handleHelpCallback(b.bot, update)
+	if len(caller.calls) != 2 || caller.calls[0].method != "answerCallbackQuery" || len(provider.listIDs) != 1 || provider.listIDs[0] != 42 || len(provider.issueIDs) != 0 {
+		t.Fatal("the unified Telegram entry must acknowledge once and only list the actor's configured routes")
+	}
+	if callText(t, caller.calls[1]) != telegramProxyMenuText || len(callbacks(b.mainMenuKeyboard())) != 4 {
+		t.Fatal("the configured provider must remain reachable from the four-action home")
+	}
+	caller.calls = nil
+	update.CallbackQuery.From.ID = 7
+	b.handleHelpCallback(b.bot, update)
+	if len(caller.calls) != 1 || len(provider.listIDs) != 1 || len(provider.issueIDs) != 0 {
+		t.Fatal("a forged unified entry must not read or issue proxy access")
+	}
+}
+
+func TestStartTelegramPayloadIsPrivateAndReadOnly(t *testing.T) {
+	for _, command := range []string{"/start telegram", "/start@rkn_otvali_bot telegram", "/start@otvali_ss_proxy_bot telegram"} {
+		for _, mode := range []string{"private", "group", "other_actor"} {
+			provider := proxyFixture()
+			b, caller, _ := stockholmTestBot(t, nil)
+			WithTelegramProxy(provider)(b)
+			update := telego.Update{Message: &telego.Message{Chat: telego.Chat{ID: 42, Type: "private"}, From: &telego.User{ID: 42}, Text: command}}
+			want := 1
+			if mode == "group" {
+				update.Message.Chat = telego.Chat{ID: -42, Type: "group"}
+				want = 0
+			}
+			if mode == "other_actor" {
+				update.Message.From.ID = 7
+				want = 0
+			}
+			b.handleStart(b.bot, update)
+			if len(caller.calls) != want || len(provider.listIDs) != want || len(provider.issueIDs) != 0 {
+				t.Fatal("Telegram deep links must only list current private actor routes")
+			}
+			if want == 1 && callText(t, caller.calls[0]) != telegramProxyMenuText {
+				t.Fatal("the Telegram deep link must reach the existing configured provider")
+			}
+		}
+	}
+}
