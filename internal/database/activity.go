@@ -61,12 +61,12 @@ func ValidActivity(source, kind, eventID string) bool {
 	switch source {
 	case "telegram":
 		switch kind {
-		case "message", "command", "callback", "key_delivered", "subscription_delivered":
+		case "message", "command", "callback", "key_delivered", "subscription_delivered", "telegram_proxy_delivered":
 			return true
 		}
 	case "miniapp":
 		switch kind {
-		case "miniapp_session", "miniapp_keys", "miniapp_key_response", "miniapp_subscription_response", "miniapp_beta_plan", "miniapp_beta_reports", "miniapp_beta_detail", "miniapp_beta_submit", "miniapp_beta_update":
+		case "miniapp_session", "miniapp_keys", "miniapp_key_response", "miniapp_subscription_response", "miniapp_beta_plan", "miniapp_beta_reports", "miniapp_beta_detail", "miniapp_beta_submit", "miniapp_beta_update", "miniapp_telegram_proxies", "miniapp_telegram_proxy_response":
 			return true
 		}
 	}

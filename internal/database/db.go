@@ -45,6 +45,10 @@ func NewDB(connectionString string, logger *slog.Logger) (*DB, error) {
 	}
 
 	wrapped := &DB{Conn: db}
+	if err := wrapped.InitTelegramProxy(context.Background()); err != nil {
+		logger.Error("Failed to initialize Telegram proxy schema")
+		return nil, err
+	}
 	if err := wrapped.InitActivity(context.Background(), time.Now()); err != nil {
 		logger.Error("Failed to initialize activity schema")
 		return nil, err

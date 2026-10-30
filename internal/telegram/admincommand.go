@@ -22,6 +22,8 @@ func (b *Bot) registerAdminCommands() {
 	b.bh.Handle(b.handleSendToAll, th.CommandEqual("send_to_all"))
 	b.bh.Handle(b.handleUsers, th.CommandEqual("users"))
 	b.bh.Handle(b.handleDeleteUser, th.CommandEqual("delete_user"))
+	b.bh.Handle(b.handleRevokeTelegram, th.CommandEqual("revoke_telegram"))
+	b.bh.Handle(b.handleRevokeTelegramCallback, th.CallbackDataPrefix(callbackRevokeTelegramPrefix))
 }
 
 func (b *Bot) handleAddServer(bot *telego.Bot, update telego.Update) {
@@ -497,13 +499,19 @@ func (b *Bot) handleDeleteUser(bot *telego.Bot, update telego.Update) {
 		return
 	}
 
-	// A bot-row deletion alone does not revoke a downloaded VPN credential.
-	// Preserve the account until its separate Stockholm grant is disabled.
+	// A bot-row deletion does not revoke downloaded VPN or proxy credentials.
+	// Keep the account until both providers confirm revocation. The final DB
+	// deletion below also serializes against new Telegram proxy issuance.
 	target, lookupErr := b.db.GetUserByID(deleteUserID)
 	if lookupErr == nil && target.TelegramID != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		checkErr := checkStockholmDeletion(ctx, *target.TelegramID, b.db, b.stockholm)
+		proxyErr := b.db.CheckTelegramProxyDisabled(ctx, *target.TelegramID)
 		cancel()
+		if proxyErr != nil {
+			_, _ = bot.SendMessage(tu.Message(tu.ID(chatID), "Данные пользователя не удалены: сначала отзовите его прокси Telegram и подтвердите отключение на серверах. Если проверка недоступна, повторите позже."))
+			return
+		}
 		if checkErr != nil {
 			_, _ = bot.SendMessage(tu.Message(tu.ID(chatID), "Данные пользователя не удалены: сначала отключите его доступ к Стокгольму в Remnawave. Если доступ уже отключён, проверьте соединение с панелью и повторите команду."))
 			return
@@ -515,16 +523,18 @@ func (b *Bot) handleDeleteUser(bot *telego.Bot, update telego.Update) {
 	}
 
 	// Delete user from database
-	err = b.db.DeleteUserByID(deleteUserID)
+	deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err = b.db.DeleteUserWithTelegramProxyGuard(deleteCtx, deleteUserID)
+	deleteCancel()
 	if err != nil {
 		msg := ""
 		if errors.Is(err, database.ErrUserNotFound) {
 			msg = fmt.Sprintf("User with ID %d not found.", deleteUserID)
 			b.NotifyAdminsOfError(username, chatID, "/delete_user", err.Error(), fmt.Sprintf("Пользователь с ID %d не найден", deleteUserID))
 		} else {
-			b.logger.Error("Error deleting user", slog.String("error", err.Error()))
-			msg = fmt.Sprintf("Error while deleting user from the database: %v.", err.Error())
-			b.NotifyAdminsOfError(username, chatID, "/delete_user", err.Error(), fmt.Sprintf("Не удалось удалить пользователя с ID %d", deleteUserID))
+			b.logger.Warn("User deletion unavailable")
+			msg = "Не удалось подтвердить отключение доступа и удалить пользователя. Данные сохранены. Проверьте доступы и повторите позже."
+			b.NotifyAdminsOfError(username, chatID, "/delete_user", "Не удалось подтвердить отключение доступа", fmt.Sprintf("Не удалось удалить пользователя с ID %d", deleteUserID))
 		}
 		_, _ = bot.SendMessage(tu.Message(message.Chat.ChatID(), msg))
 		return

@@ -33,6 +33,7 @@ type Service struct {
 	store               Store
 	managed             ManagedIssuer
 	legacy              LegacyIssuer
+	telegramProxy       TelegramProxyIssuer
 	accountCheckTimeout time.Duration
 	now                 func() time.Time
 }

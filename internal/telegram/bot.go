@@ -40,6 +40,10 @@ type Bot struct {
 	bh                    *th.BotHandler
 	sh                    *x3ui.ServerHandler
 	stockholm             StockholmIssuer
+	telegramProxy         TelegramProxyIssuer
+	proxyAdminStore       telegramProxyAdminStore
+	proxyRevokeMu         sync.Mutex
+	proxyRevokePreviews   map[string]telegramProxyRevokePreview
 	vpnHelpURL            string
 	miniAppURL            string
 	accountStatus         AccountStatusReader

@@ -91,6 +91,9 @@ func (b *Bot) mainMenuKeyboard() *telego.InlineKeyboardMarkup {
 	if b.networkStatus != nil {
 		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Состояние VPN").WithCallbackData(CallbackNetworkStatus)))
 	}
+	if b.telegramProxy != nil {
+		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Прокси для Telegram").WithCallbackData(CallbackTelegramProxy)))
+	}
 	return tu.InlineKeyboard(append(rows, helpKeyboard.InlineKeyboard...)...)
 }
 

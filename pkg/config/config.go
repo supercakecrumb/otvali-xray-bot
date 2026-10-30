@@ -10,6 +10,8 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/miniapp"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/remnawave"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/serverpolicy"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/sshapi"
+	"github.com/supercakecrumb/otvali-xray-bot/internal/telegramproxy"
 	"github.com/supercakecrumb/otvali-xray-bot/internal/vpnmonitor"
 )
 
@@ -24,6 +26,8 @@ type Config struct {
 	Stockholm                remnawave.Config
 	MiniApp                  miniapp.Config
 	VPNMonitor               vpnmonitor.Config
+	TelegramProxy            telegramproxy.Config
+	TelegramProxySSH         map[string]sshapi.Config
 }
 
 func LoadConfig() (Config, error) {
@@ -50,7 +54,13 @@ func LoadConfig() (Config, error) {
 	if monitor.Enabled && !mini.Enabled {
 		return Config{}, errors.New("VPN monitor requires the Mini App HTTP listener")
 	}
+	proxy, proxySSH, err := loadTelegramProxy(os.Getenv)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
+		TelegramProxy:            proxy,
+		TelegramProxySSH:         proxySSH,
 		VPNMonitor:               monitor,
 		MiniApp:                  mini,
 		TelegramToken:            os.Getenv("TELEGRAM_TOKEN"),

@@ -126,7 +126,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
-	known := betaPath(r.URL.Path) || r.URL.Path == "/api/miniapp/session" || r.URL.Path == "/api/miniapp/subscription" || r.URL.Path == "/api/miniapp/keys" || r.URL.Path == "/api/miniapp/key"
+	known := betaPath(r.URL.Path) || telegramProxyPath(r.URL.Path) || r.URL.Path == "/api/miniapp/session" || r.URL.Path == "/api/miniapp/subscription" || r.URL.Path == "/api/miniapp/keys" || r.URL.Path == "/api/miniapp/key"
 	if !known {
 		writeError(w, 404, "not_found")
 		return
@@ -195,7 +195,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	var payload any = &struct{}{}
-	if r.URL.Path == "/api/miniapp/key" {
+	if r.URL.Path == "/api/miniapp/key" || r.URL.Path == "/api/miniapp/telegram/proxy" {
 		payload = &body
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
@@ -204,7 +204,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request")
 		return
 	}
-	if (r.URL.Path != "/api/miniapp/key" && body.ID != "") || (r.URL.Path == "/api/miniapp/key" && body.ID != "legacy_fi" && !keyID.MatchString(body.ID)) {
+	if r.URL.Path == "/api/miniapp/key" && body.ID != "legacy_fi" && !keyID.MatchString(body.ID) {
+		writeError(w, 400, "invalid_request")
+		return
+	}
+	if r.URL.Path == "/api/miniapp/telegram/proxy" && !validTelegramProxyID(body.ID) {
 		writeError(w, 400, "invalid_request")
 		return
 	}
@@ -217,6 +221,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
+	if telegramProxyPath(r.URL.Path) {
+		h.serveTelegramProxy(ctx, w, r, actorID, body.ID)
+		return
+	}
 	switch r.URL.Path {
 	case "/api/miniapp/session":
 		account, err := h.backend.Account(ctx, actorID)
