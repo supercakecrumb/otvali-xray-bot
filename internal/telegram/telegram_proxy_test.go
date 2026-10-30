@@ -91,8 +91,13 @@ func assertLoading(t *testing.T, call recordedTelegramCall, method string) {
 
 func assertAllLinks(t *testing.T, call recordedTelegramCall, provider *fakeTelegramProxy) {
 	t.Helper()
-	if call.method != "editMessageText" || callText(t, call) != telegramProxyLinksText || !linkPreviewDisabled(t, call) {
-		t.Fatal("final view must replace the loading message with the all-routes text")
+	assertAllLinksVia(t, call, provider, "editMessageText")
+}
+
+func assertAllLinksVia(t *testing.T, call recordedTelegramCall, provider *fakeTelegramProxy, method string) {
+	t.Helper()
+	if call.method != method || callText(t, call) != telegramProxyLinksText || !linkPreviewDisabled(t, call) {
+		t.Fatalf("final view must deliver the all-routes text via %s", method)
 	}
 	want := [][]proxyButton{}
 	for _, credential := range provider.credentials {
@@ -176,6 +181,36 @@ func TestTelegramProxyFromPhotoSendsOneNewMessage(t *testing.T) {
 	assertAllLinks(t, caller.calls[2], provider)
 }
 
+func TestTelegramProxyFinalEditFailureSendsResultAnew(t *testing.T) {
+	for _, entry := range []string{"command", "callback"} {
+		t.Run(entry, func(t *testing.T) {
+			provider := proxyFixture()
+			b, caller, logs := stockholmTestBot(t, nil)
+			WithTelegramProxy(provider)(b)
+			recorder := &fakeActivityRecorder{}
+			b.activity = recorder
+			if entry == "command" {
+				// sendMessage (loading), editMessageText (fails), sendMessage.
+				caller.failCalls = map[int]bool{2: true}
+				b.handleTelegramProxy(b.bot, proxyCommand("/telegram"))
+			} else {
+				// answerCallbackQuery, editMessageText (loading), editMessageText
+				// (fails), sendMessage.
+				caller.failCalls = map[int]bool{3: true}
+				b.handleTelegramProxyCallback(b.bot, proxyUpdate(CallbackTelegramProxy))
+			}
+			n := len(caller.calls)
+			if n < 2 || caller.calls[n-2].method != "editMessageText" {
+				t.Fatal("the final view must first try to replace the loading message")
+			}
+			assertAllLinksVia(t, caller.calls[n-1], provider, "sendMessage")
+			if len(recorder.calls) != 1 || strings.Contains(logs.String(), "t.me/proxy") || strings.Contains(logs.String(), "ee001122") {
+				t.Fatal("fallback delivery must be counted once and keep links out of logs")
+			}
+		})
+	}
+}
+
 func TestTelegramProxyPartialResultOffersRefresh(t *testing.T) {
 	for _, mode := range []string{"unavailable", "invalid_url", "unknown_route", "duplicate"} {
 		t.Run(mode, func(t *testing.T) {
@@ -255,7 +290,7 @@ func TestTelegramProxyRejectsForgedCallbacksAndCommands(t *testing.T) {
 }
 
 func TestTelegramProxyFailuresNeverLeakOrRecordDelivery(t *testing.T) {
-	for _, mode := range []string{"unavailable", "revoked", "ineligible", "invalid_url", "wrong_route", "empty", "send_failure", "disabled"} {
+	for _, mode := range []string{"unavailable", "revoked", "conflict", "ineligible", "invalid_url", "wrong_route", "empty", "send_failure", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			provider := proxyFixture()
 			b, caller, logs := stockholmTestBot(t, nil)
@@ -267,6 +302,8 @@ func TestTelegramProxyFailuresNeverLeakOrRecordDelivery(t *testing.T) {
 				provider.err = errors.New("private-api-token private-secret")
 			case "revoked":
 				provider.err = telegramproxy.ErrInactive
+			case "conflict":
+				provider.err = telegramproxy.ErrConflict
 			case "ineligible":
 				provider.err = telegramproxy.ErrNotEligible
 			case "invalid_url":
@@ -280,7 +317,9 @@ func TestTelegramProxyFailuresNeverLeakOrRecordDelivery(t *testing.T) {
 			case "empty":
 				provider.credentials = nil
 			case "send_failure":
+				// Loading edit, final edit and the fallback message all fail.
 				caller.failMethod = "editMessageText"
+				caller.failCalls = map[int]bool{4: true}
 			case "disabled":
 				b.telegramProxy = nil
 			}
@@ -299,7 +338,7 @@ func TestTelegramProxyFailuresNeverLeakOrRecordDelivery(t *testing.T) {
 			if !reflect.DeepEqual(callbacks(callKeyboard(t, final)), []string{CallbackTelegramProxy, CallbackHelpBack}) {
 				t.Fatal("no issued route keeps the existing failure view")
 			}
-			wantAdmin := mode == "revoked" || mode == "ineligible"
+			wantAdmin := mode == "revoked" || mode == "conflict" || mode == "ineligible"
 			if strings.Contains(text, "Напишите администратору") != wantAdmin {
 				t.Fatal("access errors and temporary outages need their existing explanations")
 			}

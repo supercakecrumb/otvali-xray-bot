@@ -221,7 +221,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	timeout := 25 * time.Second
 	if r.URL.Path == telegramProxyAllPath {
-		// Issuing every route in sequence may wait for provider runtime
+		// Issuing every route includes one shared wait for provider runtime
 		// admission; stay below the server's 35-second write timeout.
 		timeout = 30 * time.Second
 	}

@@ -11,8 +11,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -23,7 +23,13 @@ const (
 	runtimeWait      = 8 * time.Second
 	runtimePollStart = 250 * time.Millisecond
 	runtimePollMax   = time.Second
+	issueTimeout     = 25 * time.Second
 )
+
+// errNotAdmitted marks a matching, enabled provider user that is not yet in
+// runtime. It stays inside this package: Issue and IssueAll wait and re-check,
+// then report ErrUnavailable if admission still has not happened.
+var errNotAdmitted = fmt.Errorf("%w: awaiting runtime admission", ErrUnavailable)
 
 type Service struct {
 	config    Config
@@ -31,7 +37,9 @@ type Service struct {
 	providers map[string]API
 	endpoints map[string]EndpointConfig
 	aead      cipher.AEAD
-	locks     [64]sync.Mutex
+	// locks serialize one user's issuance and revocation in this process.
+	// Each is a one-slot semaphore so waiting respects the caller's context.
+	locks [64]chan struct{}
 
 	runtimeWait, runtimePollStart, runtimePollMax time.Duration
 }
@@ -54,6 +62,9 @@ func NewServiceWithClients(c Config, store Store, clients map[string]*http.Clien
 		return nil, ErrUnavailable
 	}
 	s := &Service{config: c, store: store, providers: map[string]API{}, endpoints: map[string]EndpointConfig{}, runtimeWait: runtimeWait, runtimePollStart: runtimePollStart, runtimePollMax: runtimePollMax}
+	for i := range s.locks {
+		s.locks[i] = make(chan struct{}, 1)
+	}
 	s.config.SecretKey = append([]byte(nil), c.SecretKey...)
 	s.config.Endpoints = append([]EndpointConfig(nil), c.Endpoints...)
 	s.config.Providers = nil // API authentication remains solely in the client.
@@ -168,6 +179,24 @@ func remoteMatches(remote RemoteUser, g Grant, secret string) bool {
 	return remote.Name == g.ExternalID && subtle.ConstantTimeCompare([]byte(remote.Secret), []byte(secret)) == 1
 }
 
+// lock acquires the per-user lock or fails when ctx ends first, so neither
+// issuance nor an operator's revocation waits past its own deadline.
+func (s *Service) lock(ctx context.Context, telegramID int64) (func(), error) {
+	slot := s.locks[uint64(telegramID)%uint64(len(s.locks))]
+	if ctx.Err() != nil {
+		return nil, ErrUnavailable
+	}
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ErrUnavailable
+	}
+}
+
+// Issue returns the user's personal link for one route. A user that Telemt
+// has created but not yet admitted to runtime is awaited without holding any
+// lock, then re-checked under the locks before the grant becomes active.
 func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string) (Credential, error) {
 	if _, err := s.userID(ctx, telegramID); err != nil {
 		return Credential{}, err
@@ -176,35 +205,57 @@ func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string
 	if !ok {
 		return Credential{}, ErrNotFound
 	}
-	lock := &s.locks[uint64(telegramID)%uint64(len(s.locks))]
-	lock.Lock()
-	defer lock.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, issueTimeout)
 	defer cancel()
-	userID, err := s.userID(ctx, telegramID)
-	if err != nil {
+	credential, externalID, err := s.issueLocked(ctx, telegramID, ep)
+	if !errors.Is(err, errNotAdmitted) {
+		return credential, err
+	}
+	if err := s.awaitRuntime(ctx, s.providers[ep.ProviderID], externalID); err != nil {
 		return Credential{}, err
 	}
-	g, found, err := s.store.GetProxyGrant(ctx, telegramID, endpointID)
+	credential, _, err = s.issueLocked(ctx, telegramID, ep)
+	if errors.Is(err, errNotAdmitted) {
+		return Credential{}, ErrUnavailable
+	}
+	return credential, err
+}
+
+// issueLocked performs one guarded issuance attempt under the per-user lock
+// and the store's row locks. It never waits for runtime admission: a matching,
+// enabled user that is not yet in runtime leaves the grant unchanged and
+// returns errNotAdmitted with the grant's non-secret provider user name.
+func (s *Service) issueLocked(ctx context.Context, telegramID int64, ep EndpointConfig) (Credential, string, error) {
+	unlock, err := s.lock(ctx, telegramID)
 	if err != nil {
-		return Credential{}, err
+		return Credential{}, "", err
+	}
+	defer unlock()
+	userID, err := s.userID(ctx, telegramID)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	g, found, err := s.store.GetProxyGrant(ctx, telegramID, ep.ID)
+	if err != nil {
+		return Credential{}, "", err
 	}
 	if !found {
 		g, err = s.newGrant(userID, telegramID, ep)
 		if err != nil {
-			return Credential{}, err
+			return Credential{}, "", err
 		}
 		g, err = s.store.PrepareProxyGrant(ctx, g)
 		if err != nil {
-			return Credential{}, err
+			return Credential{}, "", err
 		}
 	}
 	if g.UserID != userID || g.TelegramID != telegramID {
-		return Credential{}, ErrInactive
+		return Credential{}, "", ErrInactive
 	}
 	var result Credential
 	var outcome error
-	err = s.store.WithProxyGrant(ctx, telegramID, endpointID, func(g *Grant) error {
+	var notAdmitted string
+	err = s.store.WithProxyGrant(ctx, telegramID, ep.ID, func(g *Grant) error {
 		if g.UserID != userID || g.TelegramID != telegramID {
 			return ErrInactive
 		}
@@ -234,10 +285,6 @@ func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string
 		if err != nil {
 			return err
 		}
-		remote, err = s.awaitRuntime(ctx, api, *g, secret, remote)
-		if err != nil {
-			return err
-		}
 		if !remoteMatches(remote, *g, secret) {
 			return ErrConflict
 		}
@@ -249,7 +296,8 @@ func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string
 			return nil
 		}
 		if !remote.InRuntime {
-			return ErrUnavailable
+			notAdmitted = g.ExternalID
+			return errNotAdmitted
 		}
 		link, err := credentialURL(ep, secret)
 		if err != nil {
@@ -262,25 +310,31 @@ func (s *Service) Issue(ctx context.Context, telegramID int64, endpointID string
 		return nil
 	})
 	if err != nil {
-		return Credential{}, err
+		// A store may normalize the callback error to ErrUnavailable.
+		if notAdmitted != "" && errors.Is(err, ErrUnavailable) {
+			return Credential{}, notAdmitted, errNotAdmitted
+		}
+		return Credential{}, "", err
 	}
 	if outcome != nil {
-		return Credential{}, outcome
+		return Credential{}, "", outcome
 	}
-	return result, nil
+	return result, "", nil
 }
 
-// awaitRuntime polls a matching, enabled user that Telemt has not yet admitted
-// to runtime. It only reads: every observation returns to Issue's existing
-// checks, so a mismatch stays a conflict and a disabled user is fenced. The
-// grant row stays locked, and the wait is bounded by runtimeWait and ctx.
-func (s *Service) awaitRuntime(ctx context.Context, api API, g Grant, secret string, remote RemoteUser) (RemoteUser, error) {
+// awaitRuntime polls a provider user that Telemt has not yet admitted to
+// runtime. It holds no lock and only reads; it never decides the outcome.
+// It returns nil on admission, on any change Issue's locked checks must see
+// (disabled or renamed user), or when runtimeWait elapses, so the caller
+// re-runs those checks. A canceled context or a failed read (including 404,
+// left to the next request's existing rules) returns an error instead.
+func (s *Service) awaitRuntime(ctx context.Context, api API, externalID string) error {
 	deadline := time.Now().Add(s.runtimeWait)
 	delay := s.runtimePollStart
-	for remoteMatches(remote, g, secret) && remote.Enabled && !remote.InRuntime {
+	for {
 		wait := time.Until(deadline)
 		if wait <= 0 {
-			break
+			return nil
 		}
 		if delay < wait {
 			wait = delay
@@ -289,62 +343,106 @@ func (s *Service) awaitRuntime(ctx context.Context, api API, g Grant, secret str
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return RemoteUser{}, ErrUnavailable
+			return ErrUnavailable
 		case <-timer.C:
 		}
-		next, err := api.GetUser(ctx, g.ExternalID)
+		remote, err := api.GetUser(ctx, externalID)
 		if errors.Is(err, ErrNotFound) {
-			// Leave the grant unchanged; the next Issue applies the existing
-			// pending/active 404 rules instead of acting on a mid-wait read.
-			return RemoteUser{}, ErrUnavailable
+			return ErrUnavailable
 		}
 		if err != nil {
-			return RemoteUser{}, err
+			return err
 		}
-		remote = next
+		if remote.InRuntime || !remote.Enabled || remote.Name != externalID {
+			return nil
+		}
 		if delay *= 2; delay > s.runtimePollMax {
 			delay = s.runtimePollMax
 		}
 	}
-	return remote, nil
 }
 
 // IssueAll issues every configured route for one user in configuration order.
-// Each route goes through Issue, its per-user lock and all grant guards; the
-// calls are sequential and IssueAll itself holds no lock. Revoked or disabled
-// routes are omitted. Other route failures are reported by endpoint ID as
-// unavailable. It fails when the user is not eligible, when every route is
-// inactive (ErrInactive), or when no route could be issued (ErrUnavailable).
+// Every route goes through the same guarded, locked attempt as Issue, one
+// route at a time; IssueAll itself holds no lock. The first pass creates or
+// confirms every route without waiting, so Telemt admits new users together.
+// The second pass waits only for routes that were not yet in runtime, making
+// the first-open delay roughly the slowest admission rather than their sum.
+//
+// Revoked or disabled routes and permanent conflicts are omitted; other route
+// failures are reported by endpoint ID as unavailable for a retry. It fails
+// when the user is not eligible; when nothing was issued it returns
+// ErrUnavailable if any route may succeed on retry, otherwise ErrConflict if
+// any route conflicts, otherwise ErrInactive.
 func (s *Service) IssueAll(ctx context.Context, telegramID int64) ([]Credential, []string, error) {
 	if _, err := s.userID(ctx, telegramID); err != nil {
 		return nil, nil, err
 	}
-	issued := make([]Credential, 0, len(s.config.Endpoints))
-	unavailable := []string{}
-	for _, ep := range s.config.Endpoints {
-		if ctx.Err() != nil {
-			unavailable = append(unavailable, ep.ID)
+	credentials := make([]Credential, len(s.config.Endpoints))
+	errs := make([]error, len(s.config.Endpoints))
+	for i, ep := range s.config.Endpoints {
+		credentials[i], errs[i] = s.issueWithoutWait(ctx, telegramID, ep.ID)
+		if errors.Is(errs[i], ErrNotEligible) {
+			return nil, nil, errs[i]
+		}
+	}
+	for i, ep := range s.config.Endpoints {
+		if !errors.Is(errs[i], errNotAdmitted) {
 			continue
 		}
-		credential, err := s.Issue(ctx, telegramID, ep.ID)
-		switch {
+		if ctx.Err() != nil {
+			errs[i] = ErrUnavailable
+			continue
+		}
+		credentials[i], errs[i] = s.Issue(ctx, telegramID, ep.ID)
+		if errors.Is(errs[i], ErrNotEligible) {
+			return nil, nil, errs[i]
+		}
+	}
+	issued := make([]Credential, 0, len(s.config.Endpoints))
+	unavailable := []string{}
+	conflict := false
+	for i, ep := range s.config.Endpoints {
+		switch err := errs[i]; {
 		case err == nil:
-			issued = append(issued, credential)
-		case errors.Is(err, ErrNotEligible):
-			return nil, nil, err
+			issued = append(issued, credentials[i])
 		case errors.Is(err, ErrInactive):
 			// Revoked or disabled routes are omitted, never offered for retry.
+		case errors.Is(err, ErrConflict):
+			// A binding or provider mismatch needs an operator; a retry
+			// cannot fix it, so the route is not offered as unavailable.
+			conflict = true
 		default:
 			unavailable = append(unavailable, ep.ID)
 		}
 	}
 	if len(issued) == 0 {
-		if len(unavailable) == 0 {
+		switch {
+		case len(unavailable) > 0:
+			return nil, nil, ErrUnavailable
+		case conflict:
+			return nil, nil, ErrConflict
+		default:
 			return nil, nil, ErrInactive
 		}
-		return nil, nil, ErrUnavailable
 	}
 	return issued, unavailable, nil
+}
+
+// issueWithoutWait is IssueAll's first pass: one locked attempt per route
+// with Issue's per-route deadline and no runtime wait.
+func (s *Service) issueWithoutWait(ctx context.Context, telegramID int64, endpointID string) (Credential, error) {
+	ep, ok := s.endpoints[endpointID]
+	if !ok {
+		return Credential{}, ErrNotFound
+	}
+	if ctx.Err() != nil {
+		return Credential{}, ErrUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, issueTimeout)
+	defer cancel()
+	credential, _, err := s.issueLocked(ctx, telegramID, ep)
+	return credential, err
 }
 
 // Revoke writes the durable fence before touching the provider. A lost reply
@@ -357,11 +455,13 @@ func (s *Service) Revoke(ctx context.Context, telegramID int64, endpointID strin
 	if !ok {
 		return ErrNotFound
 	}
-	lock := &s.locks[uint64(telegramID)%uint64(len(s.locks))]
-	lock.Lock()
-	defer lock.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, issueTimeout)
 	defer cancel()
+	unlock, err := s.lock(ctx, telegramID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	g, err := s.store.MarkProxyRevoking(ctx, telegramID, endpointID)
 	if err != nil {
 		return err

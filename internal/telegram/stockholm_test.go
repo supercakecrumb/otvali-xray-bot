@@ -40,6 +40,8 @@ type stockholmTelegramCaller struct {
 	t          *testing.T
 	calls      []recordedTelegramCall
 	failMethod string
+	// failCalls fails individual calls by their 1-based position.
+	failCalls map[int]bool
 }
 
 func (r *stockholmTelegramCaller) Call(url string, data *ta.RequestData) (*ta.Response, error) {
@@ -50,7 +52,7 @@ func (r *stockholmTelegramCaller) Call(url string, data *ta.RequestData) (*ta.Re
 	}
 	method := url[strings.LastIndex(url, "/")+1:]
 	r.calls = append(r.calls, recordedTelegramCall{method: method, body: body})
-	if method == r.failMethod {
+	if method == r.failMethod || r.failCalls[len(r.calls)] {
 		return nil, errors.New("sensitive-telegram-request-content")
 	}
 	if method == "editMessageText" || method == "sendMessage" {

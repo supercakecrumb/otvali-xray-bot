@@ -17,8 +17,9 @@ const (
 	// CallbackTelegramProxyIssue is retained for per-route buttons in messages
 	// sent before v0.2.18; they now open the same all-routes view.
 	CallbackTelegramProxyIssue = "telegram_proxy_issue:"
-	// telegramProxyTimeout bounds sequential issuance of every route. Each
-	// route also keeps the service's own per-route deadline.
+	// telegramProxyTimeout bounds issuance of every route, including one
+	// shared wait for provider runtime admission. Each route also keeps the
+	// service's own per-route deadline.
 	telegramProxyTimeout = 40 * time.Second
 )
 
@@ -104,7 +105,14 @@ func (b *Bot) deliverTelegramProxies(bot *telego.Bot, update telego.Update, acto
 	case partial:
 		b.logger.Warn("Telegram proxy routes partially unavailable", slog.Int("unavailable", len(unavailable)))
 	}
-	if b.showTelegramProxyScreen(bot, &screen, text, keyboard) && issued {
+	delivered := b.showTelegramProxyScreen(bot, &screen, text, keyboard)
+	if !delivered && screen.messageID != 0 {
+		// The loading message may have been deleted, or the edit rejected.
+		// Never leave it as the only, button-free answer: send the result anew.
+		screen.messageID = 0
+		delivered = b.showTelegramProxyScreen(bot, &screen, text, keyboard)
+	}
+	if delivered && issued {
 		b.recordTelegramActivity(update, "telegram_proxy_delivered")
 	}
 }

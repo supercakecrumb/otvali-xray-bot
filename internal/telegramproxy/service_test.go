@@ -97,25 +97,35 @@ type memoryAPI struct {
 	users                        map[string]RemoteUser
 	creates, disables, gets      int
 	uncertainCreate, failDisable bool
-	failCreate                   bool
+	failCreate, failGet          bool
 	// runtimeAfter models Telemt's asynchronous admission: 0 admits on
 	// create, N>0 admits on the Nth read after create, N<0 never admits.
 	runtimeAfter int
 	pending      map[string]int
+	// admitAfter, when positive, admits a user once this much time has
+	// passed since its creation, like Telemt applying its config.
+	admitAfter time.Duration
+	createdAt  map[string]time.Time
 	// onRead may change a stored user before a read returns it.
 	onRead func(*RemoteUser)
 }
 
 func newMemoryAPI() *memoryAPI {
-	return &memoryAPI{users: map[string]RemoteUser{}, pending: map[string]int{}}
+	return &memoryAPI{users: map[string]RemoteUser{}, pending: map[string]int{}, createdAt: map[string]time.Time{}}
 }
 func (m *memoryAPI) GetUser(_ context.Context, name string) (RemoteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.gets++
+	if m.failGet {
+		return RemoteUser{}, ErrUnavailable
+	}
 	u, ok := m.users[name]
 	if !ok {
 		return RemoteUser{}, ErrNotFound
+	}
+	if created, ok := m.createdAt[name]; ok && m.admitAfter > 0 && time.Since(created) >= m.admitAfter {
+		u.InRuntime = true
 	}
 	if left, waiting := m.pending[name]; waiting && left > 0 {
 		if left == 1 {
@@ -144,10 +154,11 @@ func (m *memoryAPI) CreateUser(_ context.Context, name, secret string) (RemoteUs
 		}
 		return old, nil
 	}
-	u := RemoteUser{Name: name, Secret: secret, Enabled: true, InRuntime: m.runtimeAfter == 0}
+	u := RemoteUser{Name: name, Secret: secret, Enabled: true, InRuntime: m.runtimeAfter == 0 && m.admitAfter <= 0}
 	if m.runtimeAfter != 0 {
 		m.pending[name] = m.runtimeAfter
 	}
+	m.createdAt[name] = time.Now()
 	m.users[name] = u
 	if m.uncertainCreate {
 		m.uncertainCreate = false

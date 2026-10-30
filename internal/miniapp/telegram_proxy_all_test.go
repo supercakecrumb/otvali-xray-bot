@@ -166,6 +166,7 @@ func TestTelegramProxyAllHTTPFailures(t *testing.T) {
 		}, 503, "unavailable"},
 		{"ineligible", func(p *proxyIssuerFake, _ *fakeStore) { p.err = telegramproxy.ErrNotEligible }, 403, "forbidden"},
 		{"revoked", func(p *proxyIssuerFake, _ *fakeStore) { p.err = telegramproxy.ErrInactive }, 403, "access_disabled"},
+		{"conflict", func(p *proxyIssuerFake, _ *fakeStore) { p.err = telegramproxy.ErrConflict }, 403, "access_disabled"},
 		{"unbound", func(_ *proxyIssuerFake, s *fakeStore) { s.err = database.ErrUserNotFound }, 403, "forbidden"},
 	} {
 		t.Run(item.name, func(t *testing.T) {
@@ -195,7 +196,9 @@ func TestTelegramProxyAllHTTPRejectsInvalidOrUnauthenticatedRequests(t *testing.
 			case "user_field":
 				body = `{"user_id":7}`
 			case "oversized":
-				body = `{"x":"` + strings.Repeat("x", 2000) + `"}`
+				// Valid empty JSON padded past the 1 KiB limit: only the
+				// body-size guard can reject it.
+				body = "{" + strings.Repeat(" ", 2000) + "}"
 			case "extra_json":
 				body = "{}{}"
 			case "query":
@@ -221,7 +224,7 @@ func TestTelegramProxyAllHTTPRejectsInvalidOrUnauthenticatedRequests(t *testing.
 					r.Header.Set("Content-Type", "text/plain")
 				}
 			})
-			want := map[string]int{"no_auth": 401, "duplicate_auth": 401, "forged": 401, "tampered": 401, "bad_origin": 403, "missing_origin": 403, "get": 405}[mode]
+			want := map[string]int{"no_auth": 401, "duplicate_auth": 401, "forged": 401, "tampered": 401, "bad_origin": 403, "missing_origin": 403, "get": 405, "oversized": 400}[mode]
 			if (want != 0 && w.Code != want) || w.Code < 400 || len(provider.allIssued)+len(provider.issued)+len(provider.listed) != 0 {
 				t.Fatalf("invalid request reached provider or used the wrong status: %d", w.Code)
 			}

@@ -344,16 +344,21 @@ The short bot navigation and opt-in offline screen exporter are documented in
 existing configured private proxy provider. Opening the section issues the
 user's personal link for every authorized route at once and shows one message
 with one launch button per route, so several proxies can be added and switched
-if one stops working. Individually revoked routes are omitted; temporarily
-unavailable routes are summarized with a refresh button. Route buttons from
+if one stops working. Individually revoked routes and routes with a
+provider or configuration conflict are omitted; temporarily unavailable
+routes are summarized with a refresh button. Route buttons from
 earlier messages open the same view. Issuance keeps the provider's existing
 personal grant and revocation rules and is not a connection check: confirm
 proxy activation in Telegram.
 
 Telemt admits a newly created user to runtime asynchronously. Issuance polls
 the provider read-only (250 ms doubling to 1 s, at most eight seconds, within
-the existing per-route deadline) before activating a grant. A user disabled or
-changed during the wait keeps the existing revoking or conflict outcome.
+the existing per-route deadline) without holding the per-user lock or database
+row locks, then re-checks the grant under those locks before activating it, so
+a concurrent revocation is not delayed. A user disabled or changed during the
+wait keeps the existing revoking or conflict outcome. Opening every route
+first creates or confirms all routes and only then waits, so the delay is
+about the slowest admission rather than the sum of them.
 
 The Mini App can request every route with `POST /api/miniapp/telegram/proxies/all`
 and body `{}`. It returns `{"proxies":[{"endpoint_id":"finland","name":"…","url":"https://t.me/proxy?…"}],"unavailable":["msk-stockholm"]}`
