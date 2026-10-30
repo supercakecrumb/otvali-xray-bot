@@ -41,9 +41,9 @@ func TestIndividualMenuPreservesLegacyFinlandAndUsesOpaqueIDs(t *testing.T) {
 	keys = append(keys, keys[0], remnawave.ServerKey{ID: "vless://secret", Name: "unsafe", URL: keys[0].URL})
 	keyboard := b.individualKeysKeyboard([]database.Server{{ID: 7, Country: "Estonia", City: "Narva"}, {ID: 1, Country: "Finland", City: "Helsinki"}}, keys)
 	got := callbacks(keyboard)
-	want := []string{"getkey_1", CallbackManagedKeyPrefix + "0123456789abcdef", CallbackManagedKeyPrefix + "123456789abcdef0", CallbackManagedKeyPrefix + "23456789abcdef01", CallbackGetKey}
+	want := []string{"getkey_1", CallbackManagedKeyPrefix + "0123456789abcdef", CallbackManagedKeyPrefix + "123456789abcdef0", CallbackManagedKeyPrefix + "23456789abcdef01", CallbackGetKey, CallbackHelpBack}
 	if len(got) != len(want) {
-		t.Fatal("one legacy key, three managed keys and back expected")
+		t.Fatal("one legacy key, three managed keys, back and home expected")
 	}
 	for i, cb := range got {
 		if cb != want[i] || strings.Contains(cb, "vless") || strings.Contains(cb, "example") {
@@ -70,7 +70,7 @@ func TestIndividualKeysUseSameActorAndOnlyKeysInterface(t *testing.T) {
 		t.Fatal("selection must reread same actor's current profiles")
 	}
 	text := callText(t, caller.calls[3])
-	if !strings.Contains(text, "msk.example:8443") || strings.Contains(text, "msk.example:9443") || !strings.Contains(text, "/help_setup") || !strings.Contains(text, "как сервер") {
+	if !strings.Contains(text, "msk.example:8443") || strings.Contains(text, "msk.example:9443") || !strings.Contains(text, "включите VPN") || !strings.Contains(text, "как сервер") {
 		t.Fatal("must deliver only selected current key plus concise setup")
 	}
 	if strings.Contains(logs.String(), "00000000") || strings.Contains(logs.String(), "msk.example") {

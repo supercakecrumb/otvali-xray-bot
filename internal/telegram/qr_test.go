@@ -116,6 +116,15 @@ func assertQRPhoto(t *testing.T, caller *qrTelegramCaller, raw, kind string) {
 	if photo == nil {
 		t.Fatal("photo upload missing")
 	}
+	parent, label := CallbackQRKeys, "Ключи для QR"
+	if kind == "подписки" {
+		parent, label = CallbackQRMenu, "QR-коды"
+	}
+	keyboard := callKeyboard(t, *photo)
+	got := callbacks(keyboard)
+	if len(got) != 2 || got[0] != parent || got[1] != CallbackHelpBack || keyboard.InlineKeyboard[0][0].Text != label {
+		t.Fatal("QR images must offer a named QR parent and home without retrieving credentials again")
+	}
 	var id int64
 	if json.Unmarshal(photo.body["chat_id"], &id) != nil || id != 42 {
 		t.Fatal("photo must go to current actor private chat")
@@ -174,7 +183,7 @@ func TestQRCommandsAreRegisteredAndNeedNoArguments(t *testing.T) {
 					t.Fatal("QR menu must not issue credentials")
 				}
 				got := callbacks(callKeyboard(t, caller.calls[0]))
-				if len(got) != 3 || got[0] != CallbackQRSubscription || got[1] != CallbackQRKeys {
+				if len(got) != 4 || got[0] != CallbackQRSubscription || got[1] != CallbackQRKeys || got[2] != CallbackGetKey || got[3] != CallbackHelpBack {
 					t.Fatal("QR type choices missing")
 				}
 			case "/qr_key":
@@ -397,8 +406,12 @@ func TestQRLegacyReadsExistingNumericOwnedKeyAndHonorsAccess(t *testing.T) {
 func TestQRDeliveryButtonsUseOnlyOpaqueSelection(t *testing.T) {
 	for _, keyboard := range []*telego.InlineKeyboardMarkup{subscriptionDeliveryKeyboard(), qrKeyDeliveryKeyboard(CallbackQRManagedPrefix + "0123456789abcdef"), qrKeyDeliveryKeyboard(CallbackQRLegacyPrefix + "8")} {
 		got := callbacks(keyboard)
-		if len(got) != 3 || !strings.HasPrefix(got[0], "qr_") {
-			t.Fatal("delivery must offer QR plus existing navigation")
+		hasQR := false
+		for _, callback := range got {
+			hasQR = hasQR || strings.HasPrefix(callback, "qr_")
+		}
+		if !hasQR {
+			t.Fatal("delivery must retain an explicit QR action")
 		}
 		for _, data := range got {
 			if len(data) > 64 || strings.Contains(data, "://") {

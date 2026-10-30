@@ -187,8 +187,8 @@ func TestSubscriptionIsOnePrivateConciseMessage(t *testing.T) {
 		t.Fatal("bounded actor request must deliver once in place")
 	}
 	text := callText(t, caller.calls[1])
-	if !strings.Contains(text, "x=1&amp;y=2") || !strings.Contains(text, "02.01.2030 15:00") || !strings.Contains(text, "/help_setup") || strings.Contains(text, "2099") {
-		t.Fatal("escaped URL, date or setup shortcut missing")
+	if !strings.Contains(text, "включите VPN") || !strings.Contains(text, "x=1&amp;y=2") || !strings.Contains(text, "02.01.2030 15:00") || strings.Contains(text, "2099") {
+		t.Fatal("escaped URL, date or client connection instruction missing")
 	}
 	var chatID int64
 	json.Unmarshal(caller.calls[1].body["chat_id"], &chatID)
@@ -198,8 +198,8 @@ func TestSubscriptionIsOnePrivateConciseMessage(t *testing.T) {
 		t.Fatal("private concise HTML response required")
 	}
 	got := callbacks(callKeyboard(t, caller.calls[1]))
-	if len(got) != 3 || got[0] != CallbackQRSubscription || got[1] != CallbackHelpVPNSetup || got[2] != CallbackGetKey {
-		t.Fatal("delivery must offer QR, setup and access")
+	if len(got) != 4 || got[0] != CallbackHelpVPNSetup || got[1] != CallbackQRSubscription || got[2] != CallbackIndividualKeys || got[3] != CallbackHelpBack {
+		t.Fatal("delivery must lead to setup and keep QR and individual keys secondary")
 	}
 	if strings.Contains(logs.String(), "private-bearer") || !strings.Contains(string(caller.calls[1].body["link_preview_options"]), `"is_disabled":true`) {
 		t.Fatal("credential logging or preview leak")

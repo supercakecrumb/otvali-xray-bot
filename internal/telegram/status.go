@@ -61,11 +61,8 @@ func (b *Bot) accountStatusText(id int64) string {
 }
 
 func accountStatusKeyboard() *telego.InlineKeyboardMarkup {
-	return tu.InlineKeyboard(
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Обновить проверку").WithCallbackData(CallbackAccountStatus)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("⚙️ Установка VPN").WithCallbackData(CallbackHelpVPNSetup)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Получить VPN").WithCallbackData(CallbackGetKey)),
-	)
+	rows := [][]telego.InlineKeyboardButton{tu.InlineKeyboardRow(tu.InlineKeyboardButton("Обновить").WithCallbackData(CallbackAccountStatus))}
+	return tu.InlineKeyboard(append(rows, navigationRows(CallbackHelpSupport)...)...)
 }
 
 func (b *Bot) handleAccountStatus(bot *telego.Bot, update telego.Update) {

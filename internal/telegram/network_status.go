@@ -69,23 +69,22 @@ func (b *Bot) networkStatusText(actor int64, route string) string {
 
 func networkStatusKeyboard(details bool, route string) *telego.InlineKeyboardMarkup {
 	var rows [][]telego.InlineKeyboardButton
-	if details {
+	parent, refresh := CallbackHelpSupport, CallbackNetworkStatus
+	switch {
+	case route != "":
+		parent, refresh = CallbackNetworkDetails, CallbackNetworkRoute+route
+	case details:
+		parent = CallbackNetworkStatus
 		for _, ids := range [][]string{{"stockholm", "finland"}, {"msk-stockholm", "msk-finland"}, {"legacy-finland", "direct"}} {
 			rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton(vpnmonitor.RouteLabels[ids[0]]).WithCallbackData(CallbackNetworkRoute+ids[0]), tu.InlineKeyboardButton(vpnmonitor.RouteLabels[ids[1]]).WithCallbackData(CallbackNetworkRoute+ids[1])))
 		}
-	} else {
-		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Подробнее по маршрутам").WithCallbackData(CallbackNetworkDetails)))
+	default:
+		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("По маршрутам").WithCallbackData(CallbackNetworkDetails)))
 	}
-	refresh := CallbackNetworkStatus
-	if route != "" {
-		refresh = CallbackNetworkRoute + route
+	if !details {
+		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Обновить статус").WithCallbackData(refresh)))
 	}
-	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Обновить статус").WithCallbackData(refresh)))
-	if route != "" {
-		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Все маршруты").WithCallbackData(CallbackNetworkStatus)))
-	}
-	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Мой доступ").WithCallbackData(CallbackAccountStatus), tu.InlineKeyboardButton("Установка VPN").WithCallbackData(CallbackHelpVPNSetup)), tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack)))
-	return tu.InlineKeyboard(rows...)
+	return tu.InlineKeyboard(append(rows, navigationRows(parent)...)...)
 }
 
 func (b *Bot) handleStatus(bot *telego.Bot, update telego.Update) {

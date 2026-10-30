@@ -25,10 +25,10 @@ func managedAccessError(err error) (text string, retryable bool) {
 	}
 }
 
-func managedFailureKeyboard(retryable bool, retryCallback, backCallback, backText string) *telego.InlineKeyboardMarkup {
+func managedFailureKeyboard(retryable bool, retryCallback, backCallback string) *telego.InlineKeyboardMarkup {
 	var rows [][]telego.InlineKeyboardButton
 	if retryable {
 		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("🔄 Повторить").WithCallbackData(retryCallback)))
 	}
-	return tu.InlineKeyboard(append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton(backText).WithCallbackData(backCallback)))...)
+	return tu.InlineKeyboard(append(rows, navigationRows(backCallback)...)...)
 }

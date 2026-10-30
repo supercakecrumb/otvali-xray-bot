@@ -41,18 +41,26 @@ func TestMiniAppEntryUsesOnlyAllowlistedOriginAndRetainsChatMenu(t *testing.T) {
 	}
 	option(b)
 	update := telego.Update{Message: &telego.Message{Chat: telego.Chat{ID: 42, Type: "private"}, From: &telego.User{ID: 42}}}
-	b.handleHelp(b.bot, update)
+	b.handleSupport(b.bot, update)
 	keyboard := callKeyboard(t, caller.calls[0])
-	if len(keyboard.InlineKeyboard) != 4 || keyboard.InlineKeyboard[0][0].Text != "Открыть приложение" || keyboard.InlineKeyboard[0][0].WebApp == nil || keyboard.InlineKeyboard[0][0].WebApp.URL != "https://app.example/vpn" || keyboard.InlineKeyboard[0][0].URL != "" || keyboard.InlineKeyboard[0][0].CallbackData != "" || !reflect.DeepEqual(keyboard.InlineKeyboard[1:], helpKeyboard.InlineKeyboard) {
-		t.Fatal("Mini App must launch with signed Telegram data while retaining all three chat actions")
+	if !reflect.DeepEqual(b.mainMenuKeyboard(), helpKeyboard) || len(callbacks(b.mainMenuKeyboard())) != 4 {
+		t.Fatal("Mini App availability must not add actions to the four-action main menu")
 	}
+	app := keyboard.InlineKeyboard[1][1]
+	if app.Text != "Mini App" || app.WebApp == nil || app.WebApp.URL != "https://app.example/vpn" || app.URL != "" || app.CallbackData != "" {
+		t.Fatal("Mini App must launch with signed Telegram data from secondary help navigation")
+	}
+	if !reflect.DeepEqual(callbacks(keyboard), []string{CallbackNetworkStatus, CallbackAccountStatus, CallbackHelpBack}) {
+		t.Fatal("help must keep network and account checks separate without issuing credentials")
+	}
+
 	clear, err := WithMiniAppURL("", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	clear(b)
 	if !reflect.DeepEqual(b.mainMenuKeyboard(), helpKeyboard) {
-		t.Fatal("disabled/absent Mini App option must preserve the original menu")
+		t.Fatal("disabled/absent Mini App must retain chat navigation and feedback fallback")
 	}
 }
 
@@ -96,8 +104,8 @@ func TestAccountStatusCallbacksArePrivateBoundedAndReadOnly(t *testing.T) {
 				if !strings.Contains(text, "Доступ по подписке: активен") || !strings.Contains(text, "временно не удалось проверить") || !strings.Contains(text, "21:30 МСК") || !strings.Contains(text, "на устройстве здесь не проверяется") || len([]rune(text)) > 600 {
 					t.Fatal("status must show independent account states without claiming traffic connectivity")
 				}
-				if !reflect.DeepEqual(callbacks(callKeyboard(t, caller.calls[1])), []string{CallbackAccountStatus, CallbackHelpVPNSetup, CallbackGetKey}) {
-					t.Fatal("status must offer refresh, installation and access")
+				if !reflect.DeepEqual(callbacks(callKeyboard(t, caller.calls[1])), []string{CallbackAccountStatus, CallbackHelpSupport, CallbackHelpBack}) {
+					t.Fatal("account status must offer refresh and return to help or home")
 				}
 			}
 			for _, secret := range []string{"private-token", "private-bearer", "raw-response"} {

@@ -38,7 +38,7 @@ func (b *Bot) individualKeysKeyboard(servers []database.Server, keys []remnawave
 		}
 		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton(string(name)).WithCallbackData(CallbackManagedKeyPrefix+key.ID)))
 	}
-	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Получить VPN").WithCallbackData(CallbackGetKey)))
+	rows = append(rows, navigationRows(CallbackGetKey)...)
 	return tu.InlineKeyboard(rows...)
 }
 
@@ -47,13 +47,13 @@ func (b *Bot) handleIndividualKeys(bot *telego.Bot, update telego.Update) {
 		return
 	}
 	var servers []database.Server
-	text := "<b>Отдельные ключи</b>\n\nВыберите сервер. Ключ добавляется в Happ или INCY как сервер, а не как подписка."
+	legacyFailed := false
 	if b.db != nil {
 		var err error
 		servers, err = b.db.GetAllServers()
 		if err != nil {
 			b.logger.Warn("Legacy server list unavailable")
-			text += "\n\nСписок старых серверов временно недоступен."
+			legacyFailed = true
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
@@ -67,17 +67,31 @@ func (b *Bot) handleIndividualKeys(bot *telego.Bot, update telego.Update) {
 		if err != nil {
 			b.logger.Warn("Individual VPN key list unavailable")
 			managedErr = err
-			message, _ := managedAccessError(err)
-			text += "\n\n" + message
 		}
 	}
+	text, keyboard := b.individualKeysView(servers, keys, legacyFailed, managedErr)
+	b.editStockholmMessage(bot, update, text, keyboard)
+}
+
+func (b *Bot) individualKeysView(servers []database.Server, keys []remnawave.ServerKey, legacyFailed bool, managedErr error) (string, *telego.InlineKeyboardMarkup) {
+	text := "<b>Отдельные ключи</b>\n\nВыберите маршрут. Добавьте ключ как сервер в Happ или INCY."
+	if legacyFailed {
+		text += "\n\nСписок прежних ключей временно недоступен."
+	}
+	if managedErr != nil {
+		message, _ := managedAccessError(managedErr)
+		text += "\n\n" + message
+	}
 	keyboard := b.individualKeysKeyboard(servers, keys)
+	if len(keyboard.InlineKeyboard) == 1 && !legacyFailed && managedErr == nil {
+		text = "<b>Отдельные ключи</b>\n\nДоступных ключей пока нет. Напишите сюда — поможем."
+	}
 	if managedErr != nil {
 		if _, retryable := managedAccessError(managedErr); retryable {
 			keyboard.InlineKeyboard = append([][]telego.InlineKeyboardButton{tu.InlineKeyboardRow(tu.InlineKeyboardButton("🔄 Повторить").WithCallbackData(CallbackIndividualKeys))}, keyboard.InlineKeyboard...)
 		}
 	}
-	b.editStockholmMessage(bot, update, text, keyboard)
+	return text, keyboard
 }
 
 func (b *Bot) handleManagedKey(bot *telego.Bot, update telego.Update) {
@@ -104,14 +118,14 @@ func (b *Bot) handleManagedKey(bot *telego.Bot, update telego.Update) {
 	if err != nil {
 		b.logger.Warn("Individual VPN key request failed")
 		text, retryable := managedAccessError(err)
-		b.editStockholmMessage(bot, update, text, managedFailureKeyboard(retryable, callback.Data, CallbackIndividualKeys, "⬅️ Отдельные ключи"))
+		b.editStockholmMessage(bot, update, text, managedFailureKeyboard(retryable, callback.Data, CallbackIndividualKeys))
 		return
 	}
 	for _, key := range keys {
 		if key.ID != id || !validServerKey(key.URL) {
 			continue
 		}
-		text := "<b>" + html.EscapeString(key.Name) + "</b>\n\n<code>" + html.EscapeString(key.URL) + "</code>\n\nДобавьте полный vless:// ключ в Happ или INCY как сервер.\nУстановка: /help_setup. Ключ никому не передавайте."
+		text := "<b>" + html.EscapeString(key.Name) + "</b>\n\n<code>" + html.EscapeString(key.URL) + "</code>\n\nДобавьте как сервер в Happ или INCY и включите VPN.\nКлюч не пересылайте."
 		if b.editStockholmMessage(bot, update, text, qrKeyDeliveryKeyboard(CallbackQRManagedPrefix+id)) {
 			b.recordTelegramActivity(update, "key_delivered")
 		}
@@ -121,7 +135,7 @@ func (b *Bot) handleManagedKey(bot *telego.Bot, update telego.Update) {
 }
 
 func (b *Bot) managedKeyUnavailable(bot *telego.Bot, update telego.Update) {
-	b.editStockholmMessage(bot, update, "Ключ сейчас недоступен. Откройте список заново или напишите администратору.", tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Отдельные ключи").WithCallbackData(CallbackIndividualKeys))))
+	b.editStockholmMessage(bot, update, "Ключ сейчас недоступен. Откройте список заново или напишите администратору.", tu.InlineKeyboard(navigationRows(CallbackIndividualKeys)...))
 }
 
 func validServerKey(raw string) bool {

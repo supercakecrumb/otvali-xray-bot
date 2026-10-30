@@ -90,7 +90,7 @@ func TestStartOpensMainMenuWithoutIssuingCredentials(t *testing.T) {
 	update := telego.Update{Message: &telego.Message{Chat: telego.Chat{ID: 42, Type: "private"}, From: &telego.User{ID: 42}, Text: "/start"}}
 	b.handleStart(b.bot, update)
 	if len(caller.calls) != 1 || caller.calls[0].method != "sendMessage" || callText(t, caller.calls[0]) != helpMessage || !reflect.DeepEqual(callbacks(callKeyboard(t, caller.calls[0])), callbacks(helpKeyboard)) {
-		t.Fatal("/start must immediately show the same three main actions as /help")
+		t.Fatal("/start must immediately show the same short main menu as /help")
 	}
 	if len(issuer.issueIDs)+len(issuer.eligibleIDs) != 0 {
 		t.Fatal("opening the main menu must not contact the issuer")

@@ -49,10 +49,17 @@ func TestBetaMenuDoesNotChangeCredentialActions(t *testing.T) {
 	b, _, _ := stockholmTestBot(t, nil)
 	option, _ := WithMiniAppURL("https://app.example/vpn", []string{"https://app.example"})
 	option(b)
-	row := b.mainMenuKeyboard().InlineKeyboard[0]
-	if len(row) != 2 || row[0].WebApp.URL != "https://app.example/vpn" || row[1].WebApp.URL != "https://app.example/vpn#beta" {
-		t.Fatal("app and beta must be separate read-only navigation actions")
+	keyboard := b.mainMenuKeyboard()
+	if keyboard.InlineKeyboard[0][0].CallbackData != CallbackStockholmSubscription {
+		t.Fatal("feedback navigation must preserve the direct primary subscription action")
 	}
+	support := b.supportKeyboard()
+	app := support.InlineKeyboard[1][1]
+	feedback := support.InlineKeyboard[1][0]
+	if app.WebApp == nil || app.WebApp.URL != "https://app.example/vpn" || feedback.WebApp == nil || feedback.WebApp.URL != "https://app.example/vpn#beta" {
+		t.Fatal("app and feedback must be separate read-only navigation actions")
+	}
+
 }
 
 func TestStartBetaPayloadOpensBetaWithoutIssuing(t *testing.T) {

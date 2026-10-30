@@ -12,7 +12,7 @@ import (
 func (b *Bot) registerCommands() {
 	// Register command handlers
 	b.bh.Handle(b.handleStart, th.CommandEqual("start"))
-	b.bh.Handle(b.handleHelp, th.CommandEqual("help"))
+	b.bh.Handle(b.handleSupport, th.CommandEqual("help"))
 	b.bh.Handle(b.handleHelpSetup, th.CommandEqual("help_setup"))
 	b.bh.Handle(b.handleBeta, th.CommandEqual("beta"))
 	b.bh.Handle(b.handleStatus, th.CommandEqual("status"))
@@ -38,6 +38,8 @@ func (b *Bot) registerCommands() {
 	b.bh.Handle(b.handleStockholmRoutingGuide, th.CallbackDataEqual(CallbackStockholmRouting))
 	b.bh.Handle(b.handleStockholmHappRouting, th.CallbackDataEqual(CallbackStockholmHappRouting))
 	b.bh.Handle(b.handleStockholmIncyRouting, th.CallbackDataEqual(CallbackStockholmIncyRouting))
+	b.bh.Handle(b.handleStockholmHappRoutingLink, th.CallbackDataEqual(CallbackStockholmHappRoutingLink))
+	b.bh.Handle(b.handleStockholmIncyRoutingLink, th.CallbackDataEqual(CallbackStockholmIncyRoutingLink))
 }
 
 // Handle /start command
@@ -51,9 +53,15 @@ func (b *Bot) handleStart(bot *telego.Bot, update telego.Update) {
 	// Notify admins about command usage
 	b.NotifyAdminsOfCommand(username, chatID, "/start", "")
 
-	if args := strings.Fields(update.Message.Text); len(args) == 2 && args[1] == "beta" {
-		b.handleBeta(bot, update)
-		return
+	if args := strings.Fields(update.Message.Text); len(args) == 2 {
+		switch args[1] {
+		case "beta":
+			b.handleBeta(bot, update)
+			return
+		case "status":
+			b.handleStatus(bot, update)
+			return
+		}
 	}
 	b.handleHelp(bot, update)
 }

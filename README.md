@@ -141,9 +141,11 @@ Provision `known_hosts` in the working directory using independently verified SS
 
 ## Optional managed subscriptions
 
-The main menu keeps three actions: get VPN access, installation, and how it works.
-The access screen offers one Otvali subscription containing all managed routes,
-plus a separate keys submenu. Managed standalone keys are exported from that same
+The main menu has four actions: get the shared subscription, installation,
+Telegram, and help. Help contains VPN availability, account access, beta feedback
+and the Mini App. Installation keeps device-specific guidance, routing and how
+it works in secondary screens. Subscription delivery also links to the Mini App
+and separate keys submenu. Managed standalone keys are exported from that same
 account and subscription; choosing a key never creates an additional identity.
 The legacy Finland key remains available in the keys submenu. Finland's server
 records, SSH/3x-ui issuance and existing credentials are preserved. Never add a Remnawave node to the legacy
@@ -269,10 +271,10 @@ reply-keyboard launch does not supply the required signed user data. No cookie,
 local login account or frontend-selected Telegram ID is accepted. Origins are
 an additional restriction, never a replacement for authentication.
 
-When enabled, the bot adds an inline **Открыть приложение** button above its
-existing three main actions. It uses `VPN_HELP_URL` only when that URL's exact
-HTTPS origin is in `MINIAPP_ALLOWED_ORIGINS`; an empty URL leaves the launch
-button hidden. The Telegram subscription/key flow remains available.
+When enabled, **Mini App** is a secondary action under **Помощь** and in
+subscription delivery. It uses `VPN_HELP_URL` only when that URL's exact HTTPS
+origin is in `MINIAPP_ALLOWED_ORIGINS`; an empty URL leaves the launch button
+hidden. The Telegram subscription/key flow remains available.
 
 | Endpoint | JSON request | Success response |
 |---|---|---|
@@ -303,10 +305,11 @@ the other provider's current readiness. This checks account authorization and
 provider availability; it does not test a customer's device, route, speed or
 VPN traffic. Neither check retrieves keys or creates an account.
 
-The private bot command `/status` and **Проверить доступ** action under
-**Как это работает** use this same read-only service. They show both account
-states with refresh, installation and access navigation. Refreshing status is
-never an issuance action. Existing-only Finland ownership and disabled-account
+The private bot command `/account` and **Мой доступ** under **Помощь** use
+this same read-only service. `/status`, `/start status` and **Проверить VPN**
+open network observations when monitoring is configured. Without monitoring,
+`/status` retains the account-only fallback. Network observations do not prove
+a customer device is connected. Refreshing either status never issues access. Existing-only Finland ownership and disabled-account
 rules apply unchanged.
 
 Issuance/listing actions
@@ -333,3 +336,6 @@ Errors contain only `{"error":{"code":"…"}}` with `unauthorized`, `forbidden`,
 The frontend must keep initData/keys/subscriptions in memory only, render them
 as text, and send none in query strings, analytics, storage or error reports.
 A managed-provider failure leaves the legacy Finland action independent.
+
+The short bot navigation and opt-in offline screen exporter are documented in
+[`docs/ux-flow.md`](docs/ux-flow.md).

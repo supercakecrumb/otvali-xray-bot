@@ -14,27 +14,42 @@ const (
 	CallbackIndividualKeys   = "individual_keys"
 	CallbackManagedKeyPrefix = "managed_key_"
 	CallbackHelpVPNSetup     = "help_vpn_setup"
+	CallbackHelpVPNDevices   = "help_vpn_devices"
+	CallbackHelpSupport      = "help_support"
 	CallbackHelpVPNLinux     = "help_vpn_linux"
 	CallbackHelpVPNWindows   = "help_vpn_windows"
 	CallbackHelpVPNAndroid   = "help_vpn_android"
 	CallbackHelpVPNIOS       = "help_vpn_ios"
 	CallbackHelpVPNMacOS     = "help_vpn_macos"
 	CallbackHelpHowItWorks   = "help_how_it_works"
+	CallbackHelpTelegram     = "help_telegram"
+	CallbackHelpBeta         = "help_beta"
 	CallbackHelpBack         = "help_back"
 )
 
-const helpMessage = "Otvali · Aurora\n\nПолучите VPN или откройте инструкцию.\nQR-коды подписки и ключей: /qr.\nДля связи с администраторами напишите в этот чат."
-const installationText = "<b>Установка VPN — 3 шага</b>\n\n1. Установите Happ или INCY.\n2. Получите подписку в «Получить VPN» и добавьте её в приложение.\n3. Обновите подписку, выберите маршрут и подключитесь.\n\nОтдельный ключ добавляется как сервер. Подробности — на сайте."
+const helpMessage = "Otvali VPN\n\nОдна подписка для Happ и INCY. Добавьте её в приложение и подключитесь."
+const supportText = "<b>Помощь</b>\n\nПроверьте VPN или свой доступ.\nНе помогло — напишите сюда."
+const installationText = "<b>Установка</b>\n\n1. Установите Happ или INCY.\n2. Добавьте ссылку как подписку.\n3. Разрешите VPN и подключитесь в приложении.\n\nНужны подробности? Выберите раздел ниже."
+const telegramHelpText = "<b>Telegram</b>\n\nПрокси-ссылка ещё не настроена. После проверки здесь появится «Подключить Telegram»; включение подтвердите вы.\n\nПока используйте VPN в Happ или INCY."
 
 var (
 	helpKeyboard = tu.InlineKeyboard(
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("🔑 Получить VPN").WithCallbackData(CallbackGetKey)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("⚙️ Установка VPN").WithCallbackData(CallbackHelpVPNSetup)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("ℹ️ Как это работает").WithCallbackData(CallbackHelpHowItWorks)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Получить подписку").WithCallbackData(CallbackStockholmSubscription)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Установка").WithCallbackData(CallbackHelpVPNSetup), tu.InlineKeyboardButton("Telegram").WithCallbackData(CallbackHelpTelegram)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Помощь").WithCallbackData(CallbackHelpSupport)),
 	)
-	helpBackKeyboard    = tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack)))
-	helpVpnBackKeyboard = tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ К установке VPN").WithCallbackData(CallbackHelpVPNSetup)))
+	helpBackKeyboard    = tu.InlineKeyboard(navigationRows(CallbackHelpBack)...)
+	helpVpnBackKeyboard = tu.InlineKeyboard(navigationRows(CallbackHelpVPNSetup)...)
 )
+
+// Navigation is explicit and never retrieves a credential while going back.
+func navigationRows(parent string) [][]telego.InlineKeyboardButton {
+	home := tu.InlineKeyboardButton("Главная").WithCallbackData(CallbackHelpBack)
+	if parent == CallbackHelpBack {
+		return [][]telego.InlineKeyboardButton{tu.InlineKeyboardRow(home)}
+	}
+	return [][]telego.InlineKeyboardButton{tu.InlineKeyboardRow(tu.InlineKeyboardButton("Назад").WithCallbackData(parent), home)}
+}
 
 // WithVPNHelpURL accepts a public guide origin/path, never a credential URL.
 func WithVPNHelpURL(raw string) (Option, error) {
@@ -81,31 +96,38 @@ func WithMiniAppURL(raw string, allowedOrigins []string) (Option, error) {
 }
 
 func (b *Bot) mainMenuKeyboard() *telego.InlineKeyboardMarkup {
-	var rows [][]telego.InlineKeyboardButton
+	return helpKeyboard
+}
+
+func (b *Bot) supportKeyboard() *telego.InlineKeyboardMarkup {
+	rows := [][]telego.InlineKeyboardButton{
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Проверить VPN").WithCallbackData(CallbackNetworkStatus), tu.InlineKeyboardButton("Мой доступ").WithCallbackData(CallbackAccountStatus)),
+	}
+	feedback := tu.InlineKeyboardButton("Оставить отзыв").WithCallbackData(CallbackHelpBeta)
 	if b.miniAppURL != "" {
-		rows = append(rows, tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton("Открыть приложение").WithWebApp(&telego.WebAppInfo{URL: b.miniAppURL}),
-			tu.InlineKeyboardButton("Бета-тест").WithWebApp(&telego.WebAppInfo{URL: b.betaURL()}),
-		))
+		feedback = tu.InlineKeyboardButton("Оставить отзыв").WithWebApp(&telego.WebAppInfo{URL: b.betaURL()})
+		rows = append(rows, tu.InlineKeyboardRow(feedback, tu.InlineKeyboardButton("Mini App").WithWebApp(&telego.WebAppInfo{URL: b.miniAppURL})))
+	} else {
+		rows = append(rows, tu.InlineKeyboardRow(feedback))
 	}
-	if b.networkStatus != nil {
-		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Состояние VPN").WithCallbackData(CallbackNetworkStatus)))
-	}
-	return tu.InlineKeyboard(append(rows, helpKeyboard.InlineKeyboard...)...)
+	return tu.InlineKeyboard(append(rows, navigationRows(CallbackHelpBack)...)...)
 }
 
 func (b *Bot) installationKeyboard() *telego.InlineKeyboardMarkup {
 	rows := [][]telego.InlineKeyboardButton{
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Windows").WithCallbackData(CallbackHelpVPNWindows), tu.InlineKeyboardButton("macOS").WithCallbackData(CallbackHelpVPNMacOS)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("По устройству").WithCallbackData(CallbackHelpVPNDevices)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Маршрутизация").WithCallbackData(CallbackStockholmRouting), tu.InlineKeyboardButton("Как это работает").WithCallbackData(CallbackHelpHowItWorks)),
+	}
+	return tu.InlineKeyboard(append(rows, navigationRows(CallbackHelpBack)...)...)
+}
+
+func (b *Bot) deviceKeyboard() *telego.InlineKeyboardMarkup {
+	rows := [][]telego.InlineKeyboardButton{
 		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Android").WithCallbackData(CallbackHelpVPNAndroid), tu.InlineKeyboardButton("iOS").WithCallbackData(CallbackHelpVPNIOS)),
+		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Windows").WithCallbackData(CallbackHelpVPNWindows), tu.InlineKeyboardButton("macOS").WithCallbackData(CallbackHelpVPNMacOS)),
 		tu.InlineKeyboardRow(tu.InlineKeyboardButton("Linux").WithCallbackData(CallbackHelpVPNLinux)),
-		tu.InlineKeyboardRow(tu.InlineKeyboardButton("🧭 Маршрутизация").WithCallbackData(CallbackStockholmRouting)),
 	}
-	if website := b.guideURL(""); website != "" {
-		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("📖 Подробная инструкция").WithURL(website)))
-	}
-	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Назад").WithCallbackData(CallbackHelpBack)))
-	return tu.InlineKeyboard(rows...)
+	return tu.InlineKeyboard(append(rows, navigationRows(CallbackHelpVPNSetup)...)...)
 }
 
 func (b *Bot) platformKeyboard(anchor string) *telego.InlineKeyboardMarkup {
@@ -115,7 +137,7 @@ func (b *Bot) platformKeyboard(anchor string) *telego.InlineKeyboardMarkup {
 	} else {
 		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Скачать Happ").WithURL("https://happ.info/")), tu.InlineKeyboardRow(tu.InlineKeyboardButton("Скачать INCY").WithURL("https://github.com/INCY-DEV/incy-platforms")))
 	}
-	rows = append(rows, helpVpnBackKeyboard.InlineKeyboard...)
+	rows = append(rows, navigationRows(CallbackHelpVPNDevices)...)
 	return tu.InlineKeyboard(rows...)
 }
 
@@ -124,6 +146,16 @@ func (b *Bot) handleHelp(bot *telego.Bot, update telego.Update) {
 		return
 	}
 	_, err := bot.SendMessage(tu.Message(tu.ID(update.Message.Chat.ID), helpMessage).WithReplyMarkup(b.mainMenuKeyboard()))
+	if err != nil {
+		b.logger.Warn("Failed to deliver help")
+	}
+}
+
+func (b *Bot) handleSupport(bot *telego.Bot, update telego.Update) {
+	if !isPrivateActorUpdate(update) || update.Message == nil {
+		return
+	}
+	_, err := bot.SendMessage(&telego.SendMessageParams{ChatID: tu.ID(update.Message.From.ID), Text: supportText, ParseMode: telego.ModeHTML, ReplyMarkup: b.supportKeyboard(), LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}})
 	if err != nil {
 		b.logger.Warn("Failed to deliver help")
 	}
@@ -156,6 +188,10 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 	}
 	text, keyboard := "", helpBackKeyboard
 	switch update.CallbackQuery.Data {
+	case CallbackHelpSupport:
+		text, keyboard = supportText, b.supportKeyboard()
+	case CallbackHelpVPNDevices:
+		text, keyboard = "<b>Ваше устройство</b>\n\nВыберите систему.", b.deviceKeyboard()
 	case CallbackHelpVPNSetup, CallbackStockholmGuide:
 		text, keyboard = installationText, b.installationKeyboard()
 	case CallbackHelpVPNLinux:
@@ -170,7 +206,12 @@ func (b *Bot) handleHelpCallback(bot *telego.Bot, update telego.Update) {
 		text, keyboard = InstructionMacOS, b.platformKeyboard("macos")
 	case CallbackHelpHowItWorks:
 		text = howItWorksText
-		keyboard = tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("Проверить доступ").WithCallbackData(CallbackAccountStatus)), helpBackKeyboard.InlineKeyboard[0])
+		keyboard = helpVpnBackKeyboard
+	case CallbackHelpTelegram:
+		text = telegramHelpText
+	case CallbackHelpBeta:
+		text, keyboard = b.betaEntry()
+
 	case CallbackHelpBack:
 		text, keyboard = helpMessage, b.mainMenuKeyboard()
 	default:

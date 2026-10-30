@@ -17,18 +17,21 @@ import (
 
 func TestMainAndInstallationNavigationStaySimple(t *testing.T) {
 	b, _, _ := stockholmTestBot(t, nil)
-	if got := callbacks(helpKeyboard); !reflect.DeepEqual(got, []string{CallbackGetKey, CallbackHelpVPNSetup, CallbackHelpHowItWorks}) || len(helpKeyboard.InlineKeyboard) != 3 {
-		t.Fatal("main menu must preserve original three actions")
+	if got := callbacks(b.mainMenuKeyboard()); !reflect.DeepEqual(got, []string{CallbackStockholmSubscription, CallbackHelpVPNSetup, CallbackHelpTelegram, CallbackHelpSupport}) {
+		t.Fatal("main menu must contain exactly subscription, setup, Telegram and help")
 	}
-	for i, want := range []string{"🔑 Получить VPN", "⚙️ Установка VPN", "ℹ️ Как это работает"} {
-		if helpKeyboard.InlineKeyboard[i][0].Text != want {
-			t.Fatal("main menu copy changed")
+	if b.mainMenuKeyboard().InlineKeyboard[0][0].Text != "Получить подписку" {
+		t.Fatal("the primary action must name the single subscription")
+	}
+	for _, callback := range callbacks(b.mainMenuKeyboard()) {
+		if callback == CallbackGetKey || callback == CallbackIndividualKeys || callback == CallbackHelpHowItWorks || callback == CallbackStockholmRouting {
+			t.Fatal("key selection and detailed help must not compete on the main menu")
 		}
 	}
 	got := callbacks(b.installationKeyboard())
-	want := []string{CallbackHelpVPNWindows, CallbackHelpVPNMacOS, CallbackHelpVPNAndroid, CallbackHelpVPNIOS, CallbackHelpVPNLinux, CallbackStockholmRouting, CallbackHelpBack}
+	want := []string{CallbackHelpVPNDevices, CallbackStockholmRouting, CallbackHelpHowItWorks, CallbackHelpBack}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatal("routing must live once under installation alongside OS choices")
+		t.Fatal("installation must keep device choices behind one action alongside routing and how it works")
 	}
 	if utf8.RuneCountInString(installationText) > 400 || !strings.Contains(installationText, "1.") || !strings.Contains(installationText, "2.") || !strings.Contains(installationText, "3.") || strings.Contains(installationText, "4.") {
 		t.Fatal("installation must remain three short steps")
@@ -41,8 +44,11 @@ func TestStaticGuidesArePrivateAndNeverIssue(t *testing.T) {
 		handler  func(*Bot, *telego.Bot, telego.Update)
 	}{
 		{CallbackHelpVPNSetup, (*Bot).handleHelpCallback}, {CallbackStockholmGuide, (*Bot).handleStockholmGuide},
+		{CallbackHelpVPNDevices, (*Bot).handleHelpCallback}, {CallbackHelpSupport, (*Bot).handleHelpCallback}, {CallbackHelpHowItWorks, (*Bot).handleHelpCallback},
+		{CallbackHelpTelegram, (*Bot).handleHelpCallback}, {CallbackHelpBeta, (*Bot).handleHelpCallback},
 		{CallbackHelpVPNWindows, (*Bot).handleHelpCallback}, {CallbackHelpVPNMacOS, (*Bot).handleHelpCallback}, {CallbackHelpVPNAndroid, (*Bot).handleHelpCallback}, {CallbackHelpVPNIOS, (*Bot).handleHelpCallback}, {CallbackHelpVPNLinux, (*Bot).handleHelpCallback},
 		{CallbackStockholmRouting, (*Bot).handleStockholmRoutingGuide}, {CallbackStockholmHappRouting, (*Bot).handleStockholmHappRouting}, {CallbackStockholmIncyRouting, (*Bot).handleStockholmIncyRouting},
+		{CallbackStockholmHappRoutingLink, (*Bot).handleStockholmHappRoutingLink}, {CallbackStockholmIncyRoutingLink, (*Bot).handleStockholmIncyRoutingLink},
 	} {
 		t.Run(tc.callback, func(t *testing.T) {
 			issuer := &fakeStockholmIssuer{eligible: false}
@@ -104,7 +110,7 @@ func TestVPNHelpURLValidationAndAnchors(t *testing.T) {
 	}
 	for _, tc := range []struct{ callback, anchor string }{{CallbackHelpVPNWindows, "windows"}, {CallbackHelpVPNMacOS, "macos"}, {CallbackHelpVPNAndroid, "android"}, {CallbackHelpVPNIOS, "ios"}, {CallbackHelpVPNLinux, "linux"}} {
 		keyboard := b.platformKeyboard(tc.anchor)
-		if keyboard.InlineKeyboard[0][0].URL != "https://guide.example/vpn#"+tc.anchor || keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1][0].CallbackData != CallbackHelpVPNSetup {
+		if keyboard.InlineKeyboard[0][0].URL != "https://guide.example/vpn#"+tc.anchor || keyboard.InlineKeyboard[len(keyboard.InlineKeyboard)-1][0].CallbackData != CallbackHelpVPNDevices {
 			t.Fatal("platform website/back navigation mismatch")
 		}
 	}
@@ -158,7 +164,7 @@ func TestRoutingProfileIsOnlyShownAfterExplicitAppAction(t *testing.T) {
 	for _, tc := range []struct {
 		callback, scheme string
 		handler          func(*Bot, *telego.Bot, telego.Update)
-	}{{CallbackStockholmRouting, "", (*Bot).handleStockholmRoutingGuide}, {CallbackStockholmHappRouting, "happ", (*Bot).handleStockholmHappRouting}, {CallbackStockholmIncyRouting, "incy", (*Bot).handleStockholmIncyRouting}} {
+	}{{CallbackStockholmRouting, "", (*Bot).handleStockholmRoutingGuide}, {CallbackStockholmHappRouting, "", (*Bot).handleStockholmHappRouting}, {CallbackStockholmIncyRouting, "", (*Bot).handleStockholmIncyRouting}, {CallbackStockholmHappRoutingLink, "happ", (*Bot).handleStockholmHappRoutingLink}, {CallbackStockholmIncyRoutingLink, "incy", (*Bot).handleStockholmIncyRoutingLink}} {
 		b, caller, _ := stockholmTestBot(t, nil)
 		update := stockholmUpdate()
 		update.CallbackQuery.Data = tc.callback
@@ -220,7 +226,7 @@ func TestLegacyKeyCaptionPreservesKeyAndEscapesMarkdown(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(text, "как сервер") || !strings.Contains(text, "/help\\_setup") || utf8.RuneCountInString(parts[2]) > 200 {
-		t.Fatal("single key needs short import guidance and setup shortcut")
+	if !strings.Contains(text, "как сервер") || !strings.Contains(text, "включите VPN") || utf8.RuneCountInString(parts[2]) > 200 {
+		t.Fatal("single key needs short server import and client connection guidance")
 	}
 }

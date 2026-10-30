@@ -12,14 +12,7 @@ import (
 	"github.com/supercakecrumb/otvali-xray-bot/internal/database"
 )
 
-var backHomeKeyboard = tu.InlineKeyboard(
-	tu.InlineKeyboardRow(
-		tu.InlineKeyboardButton("⚙️ Установка VPN").WithCallbackData(CallbackHelpVPNSetup),
-	),
-	tu.InlineKeyboardRow(
-		tu.InlineKeyboardButton("⬅️ Отдельные ключи").WithCallbackData(CallbackIndividualKeys),
-	),
-)
+var backHomeKeyboard = tu.InlineKeyboard(navigationRows(CallbackIndividualKeys)...)
 
 // Handle /get_key command
 func (b *Bot) handleGetKey(bot *telego.Bot, update telego.Update) {
@@ -250,7 +243,7 @@ func (b *Bot) generateKeyProcess(serverID int, update telego.Update) {
 
 func legacyKeyCaption(serverName, key string) string {
 	return "Ключ для " + escapeMarkdownV2(serverName) + ":\n\n```" + key + "```\n\n" +
-		escapeMarkdownV2("Добавьте полный vless:// ключ в Happ или INCY как сервер. Установка: /help_setup. Ключ никому не передавайте.")
+		escapeMarkdownV2("Добавьте как сервер в Happ или INCY и включите VPN. Ключ не пересылайте.")
 }
 
 // A single synchronous edit keeps loading and final delivery in one goroutine.

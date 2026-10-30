@@ -7,7 +7,7 @@ import (
 	tu "github.com/mymmrac/telego/telegoutil"
 )
 
-const betaMessage = "<b>Бета-тест VPN</b>\n\nВыберите один маршрут и проверьте видео, Telegram и сайты. В форме можно отметить, что работает, а что нет, и оставить комментарий. Не нужно проверять всё сразу.\n\nОтветы видите только вы и администраторы. Не присылайте ключи и ссылки подписки."
+const betaMessage = "<b>Бета-отзыв</b>\n\nПроверьте один маршрут и расскажите, что работает. Ответы видите только вы и администраторы.\n\nКлючи и ссылки подписки не присылайте."
 
 func (b *Bot) betaURL() string {
 	if b.miniAppURL == "" {
@@ -25,15 +25,20 @@ func (b *Bot) handleBeta(bot *telego.Bot, update telego.Update) {
 	if !isPrivateActorUpdate(update) || update.Message == nil {
 		return
 	}
-	text := betaMessage
-	var keyboard *telego.InlineKeyboardMarkup
-	if link := b.betaURL(); link != "" {
-		keyboard = tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("Начать проверку / оставить отзыв").WithWebApp(&telego.WebAppInfo{URL: link})))
-	} else {
-		text += "\n\nФорма сейчас недоступна. Напишите о проблеме в этот чат."
-	}
+	text, keyboard := b.betaEntry()
 	_, err := bot.SendMessage(&telego.SendMessageParams{ChatID: tu.ID(update.Message.From.ID), Text: text, ParseMode: telego.ModeHTML, ReplyMarkup: keyboard, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}})
 	if err != nil {
 		b.logger.Warn("Failed to deliver beta entry")
 	}
+}
+
+func (b *Bot) betaEntry() (string, *telego.InlineKeyboardMarkup) {
+	text := betaMessage
+	var rows [][]telego.InlineKeyboardButton
+	if link := b.betaURL(); link != "" {
+		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("Оставить отзыв").WithWebApp(&telego.WebAppInfo{URL: link})))
+	} else {
+		text += "\n\nФорма сейчас недоступна. Напишите о проблеме в этот чат."
+	}
+	return text, tu.InlineKeyboard(append(rows, navigationRows(CallbackHelpSupport)...)...)
 }

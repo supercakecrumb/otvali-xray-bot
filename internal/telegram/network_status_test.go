@@ -106,8 +106,11 @@ func TestNetworkStatusCallbacksArePrivateCachedAndReadOnly(t *testing.T) {
 						}
 					}
 				}
-				if !found {
+				if !found && mode != "details" {
 					t.Fatal("refresh must be labelled as cached status")
+				}
+				if mode == "details" && found {
+					t.Fatal("the route picker must not add a refresh that leaves the picker")
 				}
 			}
 		})

@@ -96,7 +96,7 @@ func (b *Bot) handleQRCallback(bot *telego.Bot, update telego.Update) {
 
 func (b *Bot) qrReply(bot *telego.Bot, id int64, text string, keyboard *telego.InlineKeyboardMarkup) {
 	if keyboard == nil {
-		keyboard = tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("Другой QR-код").WithCallbackData(CallbackQRMenu)))
+		keyboard = qrImageKeyboard(true)
 	}
 	_, err := bot.SendMessage(&telego.SendMessageParams{ChatID: tu.ID(id), Text: text, ParseMode: telego.ModeHTML, ReplyMarkup: keyboard, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}})
 	if err != nil {
@@ -111,15 +111,16 @@ func (b *Bot) showQRMenu(bot *telego.Bot, id int64) {
 	if b.stockholm != nil && b.stockholm.Eligible(ctx, id) {
 		rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("QR-код подписки").WithCallbackData(CallbackQRSubscription)))
 	}
-	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("QR-код отдельного ключа").WithCallbackData(CallbackQRKeys)), tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ Получить VPN").WithCallbackData(CallbackGetKey)))
-	b.qrReply(bot, id, "<b>QR-коды VPN</b>\n\nВыберите подписку или отдельный ключ. Ничего вводить или вставлять не нужно.", tu.InlineKeyboard(rows...))
+	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("QR-код ключа").WithCallbackData(CallbackQRKeys)))
+	rows = append(rows, navigationRows(CallbackGetKey)...)
+	b.qrReply(bot, id, "<b>QR-коды VPN</b>\n\nВыберите, что добавить в приложение.", tu.InlineKeyboard(rows...))
 }
 
 func (b *Bot) showQRKeys(bot *telego.Bot, id int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	var rows [][]telego.InlineKeyboardButton
-	text := "<b>QR-код отдельного ключа</b>\n\nВыберите сервер."
+	text := "<b>QR-код отдельного ключа</b>\n\nВыберите маршрут."
 	store := b.qrRequestStore(ctx)
 	if store != nil && b.qrLegacy != nil {
 		user, err := store.GetUserByTelegramID(id)
@@ -157,7 +158,7 @@ func (b *Bot) showQRKeys(bot *telego.Bot, id int64) {
 	if len(rows) == 0 {
 		text += "\n\nДоступных ключей пока нет. Получите ключ через /get_key или попробуйте позже."
 	}
-	rows = append(rows, tu.InlineKeyboardRow(tu.InlineKeyboardButton("⬅️ QR-коды").WithCallbackData(CallbackQRMenu)))
+	rows = append(rows, navigationRows(CallbackQRMenu)...)
 	b.qrReply(bot, id, text, tu.InlineKeyboard(rows...))
 }
 
@@ -259,6 +260,14 @@ type qrPNGFile struct{ *bytes.Reader }
 
 func (qrPNGFile) Name() string { return "otvali-qr.png" }
 
+func qrImageKeyboard(subscription bool) *telego.InlineKeyboardMarkup {
+	label, parent := "Ключи для QR", CallbackQRKeys
+	if subscription {
+		label, parent = "QR-коды", CallbackQRMenu
+	}
+	return tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton(label).WithCallbackData(parent), tu.InlineKeyboardButton("Главная").WithCallbackData(CallbackHelpBack)))
+}
+
 func (b *Bot) sendQRImage(bot *telego.Bot, id int64, raw, name string, subscription bool, updates ...telego.Update) {
 	png, err := qrcode.PNG(raw)
 	if err != nil {
@@ -271,8 +280,8 @@ func (b *Bot) sendQRImage(bot *telego.Bot, id int64, raw, name string, subscript
 		kind = "подписки"
 		instruction = "Добавьте как подписку, чтобы получить все маршруты."
 	}
-	caption := "<b>QR-код " + kind + " · " + html.EscapeString(qrShortName(name)) + "</b>\n\nОтсканируйте в Happ или INCY с другого устройства либо импортируйте изображение из галереи, если приложение поддерживает это. " + instruction + "\n\nQR-код даёт доступ к VPN. Никому его не передавайте."
-	_, err = bot.SendPhoto(&telego.SendPhotoParams{ChatID: tu.ID(id), Photo: tu.File(qrPNGFile{bytes.NewReader(png)}), Caption: caption, ParseMode: telego.ModeHTML, ReplyMarkup: tu.InlineKeyboard(tu.InlineKeyboardRow(tu.InlineKeyboardButton("Другой QR-код").WithCallbackData(CallbackQRMenu)))})
+	caption := "<b>QR-код " + kind + " · " + html.EscapeString(qrShortName(name)) + "</b>\n\nОтсканируйте в Happ или INCY с другого устройства. " + instruction + "\n\nQR-код даёт доступ к VPN. Никому его не передавайте."
+	_, err = bot.SendPhoto(&telego.SendPhotoParams{ChatID: tu.ID(id), Photo: tu.File(qrPNGFile{bytes.NewReader(png)}), Caption: caption, ParseMode: telego.ModeHTML, ReplyMarkup: qrImageKeyboard(subscription)})
 	if err != nil {
 		b.logger.Warn("Failed to deliver QR image")
 		b.qrReply(bot, id, "Не удалось отправить QR-код. Повторите запрос или скопируйте ссылку через /get_key.", nil)
